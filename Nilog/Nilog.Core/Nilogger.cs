@@ -1,3 +1,12 @@
+// -----------------------------------------------------------------------------
+//  Nilog — zero-allocation, high-performance logging extensions for
+//  Microsoft.Extensions.Logging. Strongly-typed Write* overloads skip the
+//  params object[] allocation (and allocate nothing when a level is disabled),
+//  plus scopes, formatted exception reports, and process-wide hooks.
+//
+//  File        : Nilogger.cs
+//  Developer   ::> Gehan Fernando
+// -----------------------------------------------------------------------------
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -245,8 +254,8 @@ public static class Nilogger
         public TemplateFormatter(string template)
         {
             Template = template ?? string.Empty;
-            var names = new List<string>(4);
-            var sb = new StringBuilder(Template.Length + 8);
+            List<string> names = new(4);
+            StringBuilder sb = new(Template.Length + 8);
             int len = Template.Length;
             int pos = 0;
 
@@ -571,21 +580,21 @@ public static class Nilogger
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     private static void Emit<T0>(ILogger logger, LogLevel level, Exception exception, string message, T0 v0)
     {
-        var fmt = GetFormatter(message ?? "N/A");
+        TemplateFormatter fmt = GetFormatter(message ?? "N/A");
         logger.Log(level, GetEventId(level), new LogState<T0>(fmt, v0), exception, static (s, _) => s.ToString());
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     private static void Emit<T0, T1>(ILogger logger, LogLevel level, Exception exception, string message, T0 v0, T1 v1)
     {
-        var fmt = GetFormatter(message ?? "N/A");
+        TemplateFormatter fmt = GetFormatter(message ?? "N/A");
         logger.Log(level, GetEventId(level), new LogState<T0, T1>(fmt, v0, v1), exception, static (s, _) => s.ToString());
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     private static void Emit<T0, T1, T2>(ILogger logger, LogLevel level, Exception exception, string message, T0 v0, T1 v1, T2 v2)
     {
-        var fmt = GetFormatter(message ?? "N/A");
+        TemplateFormatter fmt = GetFormatter(message ?? "N/A");
         logger.Log(level, GetEventId(level), new LogState<T0, T1, T2>(fmt, v0, v1, v2), exception, static (s, _) => s.ToString());
     }
 
@@ -1279,7 +1288,7 @@ public static class Nilogger
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static string FormatExceptionMessageInternal(Exception ex, string title, bool moreDetailsEnabled)
     {
-        var sb = _sbPool.Get();
+        StringBuilder sb = _sbPool.Get();
         try
         {
             _ = sb.Clear();
@@ -1378,7 +1387,7 @@ public static class Nilogger
             throw new ArgumentException("Key cannot be null or whitespace.", nameof(key));
         }
 
-        var scope = new SingleScope(key, value);
+        SingleScope scope = new(key, value);
         return logger.BeginScope(scope) ?? new DisposableScope(scope);
     }
 
@@ -1406,25 +1415,25 @@ public static class Nilogger
 
         if (context.Count <= 4)
         {
-            var items = new KeyValuePair<string, object>[context.Count];
+            KeyValuePair<string, object>[] items = new KeyValuePair<string, object>[context.Count];
             int i = 0;
-            foreach (var kv in context)
+            foreach (KeyValuePair<string, object> kv in context)
             {
                 items[i++] = new KeyValuePair<string, object>(kv.Key, kv.Value ?? "N/A");
             }
 
-            var wrapper = new SmallScopeWrapper(items);
+            SmallScopeWrapper wrapper = new(items);
             return logger.BeginScope(wrapper) ?? new DisposableScope(wrapper);
         }
         else
         {
-            var safe = new List<KeyValuePair<string, object>>(context.Count);
-            foreach (var kv in context)
+            List<KeyValuePair<string, object>> safe = new(context.Count);
+            foreach (KeyValuePair<string, object> kv in context)
             {
                 safe.Add(new KeyValuePair<string, object>(kv.Key, kv.Value ?? "N/A"));
             }
 
-            var wrapper = new ScopeWrapper(safe);
+            ScopeWrapper wrapper = new(safe);
             return logger.BeginScope(wrapper) ?? new DisposableScope(wrapper);
         }
     }
@@ -1543,7 +1552,7 @@ public static class Nilogger
                 return string.Empty;
             }
 
-            var sb = new StringBuilder(_items.Count * 16);
+            StringBuilder sb = new(_items.Count * 16);
             for (int i = 0; i < _items.Count; i++)
             {
                 if (i > 0)
@@ -1551,7 +1560,7 @@ public static class Nilogger
                     _ = sb.Append(' ');
                 }
 
-                var kv = _items[i];
+                KeyValuePair<string, object> kv = _items[i];
                 _ = sb.Append(kv.Key).Append('=').Append(kv.Value);
             }
             return sb.ToString();
@@ -1628,7 +1637,7 @@ public static class Nilogger
                 return string.Empty;
             }
 
-            var sb = new StringBuilder(_items.Length * 16);
+            StringBuilder sb = new(_items.Length * 16);
             for (int i = 0; i < _items.Length; i++)
             {
                 if (i > 0)
@@ -1636,7 +1645,7 @@ public static class Nilogger
                     _ = sb.Append(' ');
                 }
 
-                var kv = _items[i];
+                KeyValuePair<string, object> kv = _items[i];
                 _ = sb.Append(kv.Key).Append('=').Append(kv.Value);
             }
             return sb.ToString();

@@ -1,3 +1,11 @@
+// -----------------------------------------------------------------------------
+//  Nilog tests — covers the static Nilogger.Log(...) family: levels, typed and
+//  params overloads, attached exceptions, the disabled-level no-op, and stable
+//  EventIds across argument counts.
+//
+//  File        : LogMethodTests.cs
+//  Developer   ::> Gehan Fernando
+// -----------------------------------------------------------------------------
 using Microsoft.Extensions.Logging;
 
 namespace Nilog.Tests;
@@ -8,7 +16,7 @@ public class LogMethodTests
     [Fact]
     public void Log_PlainMessage_IsCaptured()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         Nilogger.Log(logger, LogLevel.Information, "hello world");
 
@@ -19,9 +27,9 @@ public class LogMethodTests
     [Fact]
     public void Log_NullMessage_BecomesNA()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
-        Nilogger.Log(logger, LogLevel.Information, (string)null!);
+        Nilogger.Log(logger, LogLevel.Information, null!);
 
         Assert.Equal("N/A", logger.Single.Message);
     }
@@ -35,7 +43,7 @@ public class LogMethodTests
     [InlineData(LogLevel.Critical)]
     public void Log_EmitsRequestedLevel(LogLevel level)
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         Nilogger.Log(logger, level, "msg");
 
@@ -45,7 +53,7 @@ public class LogMethodTests
     [Fact]
     public void Log_OneTypedArg_RendersAndCarriesState()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         Nilogger.Log(logger, LogLevel.Warning, "x = {X}", 9);
 
@@ -57,7 +65,7 @@ public class LogMethodTests
     [Fact]
     public void Log_TwoTypedArgs_Render()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         Nilogger.Log(logger, LogLevel.Information, "{A}+{B}", 2, 3);
 
@@ -69,7 +77,7 @@ public class LogMethodTests
     [Fact]
     public void Log_ThreeTypedArgs_Render()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         Nilogger.Log(logger, LogLevel.Information, "{A}-{B}-{C}", 1, 2, 3);
 
@@ -82,7 +90,7 @@ public class LogMethodTests
     [Fact]
     public void Log_ParamsArray_NoException_Renders()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         // Four arguments: no typed overload matches, so the params object[] path runs.
         Nilogger.Log(logger, LogLevel.Information, "{A} {B} {C} {D}", 1, 2, 3, 4);
@@ -95,8 +103,8 @@ public class LogMethodTests
     [Fact]
     public void Log_ParamsArray_WithException_AttachesException()
     {
-        var logger = new TestLogger();
-        var ex = new InvalidOperationException("boom");
+        TestLogger logger = new();
+        InvalidOperationException ex = new("boom");
 
         Nilogger.Log(logger, LogLevel.Error, "a {0} {1} {2} {3}", ex, 1, 2, 3, 4);
 
@@ -107,8 +115,8 @@ public class LogMethodTests
     [Fact]
     public void Log_ExceptionFirstOverload_AttachesException()
     {
-        var logger = new TestLogger();
-        var ex = new InvalidOperationException("kaboom");
+        TestLogger logger = new();
+        InvalidOperationException ex = new("kaboom");
 
         Nilogger.Log(logger, LogLevel.Critical, ex, "msg {0}", 7);
 
@@ -120,7 +128,8 @@ public class LogMethodTests
     [Fact]
     public void Log_WhenLevelDisabled_DoesNothing()
     {
-        var logger = new TestLogger { MinLevel = LogLevel.Warning };
+        TestLogger logger = new()
+        { MinLevel = LogLevel.Warning };
 
         Nilogger.Log(logger, LogLevel.Information, "should not appear");
         Nilogger.Log(logger, LogLevel.Debug, "{X}", 1);
@@ -131,7 +140,7 @@ public class LogMethodTests
     [Fact]
     public void Log_AllLevels_ShareStableEventIdAcrossArgCounts()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         Nilogger.Log(logger, LogLevel.Information, "no args");
         Nilogger.Log(logger, LogLevel.Information, "one {A}", 1);

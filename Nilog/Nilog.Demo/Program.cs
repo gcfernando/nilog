@@ -1,3 +1,10 @@
+// -----------------------------------------------------------------------------
+//  Nilog demo — a runnable, commented feature tour that walks through every
+//  public Nilog feature end to end.
+//
+//  File        : Program.cs
+//  Developer   ::> Gehan Fernando
+// -----------------------------------------------------------------------------
 // =============================================================================
 //  Nilog - Feature Tour
 // -----------------------------------------------------------------------------
@@ -17,9 +24,9 @@ using Nilog;
 //    console here, but Serilog/OpenTelemetry/etc. behave identically. We turn the
 //    minimum level down to Trace so every example below is actually emitted.
 // -----------------------------------------------------------------------------
-using var loggerFactory = LoggerFactory.Create(builder =>
+using ILoggerFactory loggerFactory = LoggerFactory.Create(builder =>
 {
-    builder
+    _ = builder
         .SetMinimumLevel(LogLevel.Trace)
         .AddSimpleConsole(o =>
         {
@@ -72,7 +79,7 @@ Section("5. Logging exceptions alongside a message");
 {
     try
     {
-        ParseBudget("not-a-number");
+        _ = ParseBudget("not-a-number");
     }
     catch (Exception ex)
     {
@@ -102,7 +109,7 @@ Section("7. Customising how exceptions are rendered");
     Nilogger.ExceptionFormatter = (ex, title, _) => $"[{title}] {ex.GetType().Name}: {ex.Message}";
     try
     {
-        ParseBudget("oops");
+        _ = ParseBudget("oops");
     }
     catch (Exception ex)
     {
@@ -123,7 +130,7 @@ Section("8. Scopes - attach context to everything logged inside a block");
 
         // ...or a whole bag of context. Small bags (<= 4 entries) take an
         // allocation-light path; larger ones fall back to a list.
-        var context = new Dictionary<string, object>
+        Dictionary<string, object> context = new()
         {
             ["UserId"] = 42,
             ["Tenant"] = "acme",
@@ -141,7 +148,7 @@ Section("9. Disabled levels cost (almost) nothing");
     // Spin up a logger that only listens at Warning and above. Trace/Debug/Info
     // calls return immediately after the IsEnabled check - no array, no boxing,
     // no formatting. This is the whole point of Nilog on a hot path.
-    using var quietFactory = LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Warning).AddSimpleConsole(o => o.SingleLine = true));
+    using ILoggerFactory quietFactory = LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Warning).AddSimpleConsole(o => o.SingleLine = true));
     ILogger quiet = quietFactory.CreateLogger("Quiet");
 
     quiet.WriteInformation("You will NOT see this - filtered out for free.");
@@ -174,10 +181,12 @@ Console.WriteLine("Tour complete. You have now seen every Nilog feature. Happy (
 //  Helpers used by the examples above.
 // =============================================================================
 
-static int ParseBudget(string raw) =>
-    int.TryParse(raw, out int value)
+static int ParseBudget(string raw)
+{
+    return int.TryParse(raw, out int value)
         ? value
         : throw new FormatException($"'{raw}' is not a valid budget.");
+}
 
 static void LoadProfile()
 {

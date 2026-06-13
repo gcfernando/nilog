@@ -81,8 +81,8 @@ logger.WriteDebug(
 
 |  |  |
 |--|--|
-| 🚀 **Zero-alloc disabled path** | A filtered-out call returns in ~1 ns and allocates **0 bytes**. |
-| 🧠 **Lean enabled path** | Strongly-typed structs render **~20–60% faster** and use **~30% less** memory than `params`. |
+| 🚀 **Zero-alloc disabled path** | A filtered-out call returns in **under a nanosecond** and allocates **0 bytes**. |
+| 🧠 **Lean enabled path** | Strongly-typed structs render **~20–40% faster** and use **~30% less** memory than `params`. |
 | 🔌 **Drop-in** | Same `ILogger`, same `{Named}` templates, same structured output to Serilog / OTel / Seq / App Insights. |
 | 🧩 **Zero setup** | Just `using Nilog;` — no DI, no registration, no config files. |
 | 🧯 **Never throws** | A bad template falls back to raw text instead of throwing a `FormatException` out of a log call. |
@@ -127,15 +127,15 @@ already use. The table below compares the *call-site cost* of writing a log line
   so there is **less garbage for the GC** on every line.
 - **Allocates nothing when disabled** → if `Debug`/`Trace` is switched off, Microsoft/Serilog
   still build that array *before* discarding the message. Nilog checks first and builds nothing —
-  a disabled call is **~1 ns and 0 bytes**.
+  a disabled call is **under a nanosecond and 0 bytes**.
 
 ---
 
 ## 📊 Benchmarks
 
-> Measured with [BenchmarkDotNet](https://benchmarkdotnet.org) v0.15.8 on **.NET 10.0.8**,
+> Measured with [BenchmarkDotNet](https://benchmarkdotnet.org) v0.15.8 on **.NET 8.0.27**,
 > AMD Ryzen AI 9 365, Windows 11. Reproduce locally with
-> `dotnet run -c Release --project Nilog.Benchmark -f net10.0`.
+> `dotnet run -c Release --project Nilog.Benchmark -f net8.0`.
 
 ### 🏆 The headline: a disabled log call
 
@@ -143,8 +143,8 @@ This is the call your service makes thousands of times a second when `Debug`/`Tr
 
 ```text
 Time per call — lower is better (nanoseconds)
-Microsoft  ████████████████████████████████████████████████  112.27 ns
-Nilog      ▏                                                    1.06 ns   ← 106× faster
+Microsoft  ████████████████████████████████████████████████  142.48 ns
+Nilog      ▏                                                    0.48 ns   ← ~297× faster
 
 Allocations per call — lower is better (bytes)
 Microsoft  ████████████████████████████████████████████████  208 B
@@ -153,20 +153,20 @@ Nilog                                                           0 B     ← noth
 
 | Method | Mean | Allocated |
 |--------|-----:|----------:|
-| Microsoft `.LogInformation` | 112.27 ns | 208 B |
-| **Nilog `.WriteInformation`** | **1.06 ns** | **0 B** 🟢 |
+| Microsoft `.LogInformation` | 142.48 ns | 208 B |
+| **Nilog `.WriteInformation`** | **0.48 ns** | **0 B** 🟢 |
 
-**≈106× faster, zero bytes.** The strongly-typed overload is picked at compile time, so there is
+**≈297× faster, zero bytes.** The strongly-typed overload is picked at compile time, so there is
 no array to build and no value to box before the `IsEnabled` check returns `false`.
 
 ### 🔥 Enabled calls (level on, message rendered)
 
 | Scenario | Library | Mean | Allocated |
 |----------|---------|-----:|----------:|
-| 1 argument  | Microsoft | 61.32 ns | 112 B |
-| 1 argument  | **Nilog** | **47.78 ns** `0.78×` | **80 B** `0.71×` |
-| 3 arguments | Microsoft | 103.96 ns | 152 B |
-| 3 arguments | **Nilog** | **65.80 ns** `0.63×` | **104 B** `0.68×` |
+| 1 argument  | Microsoft | 72.03 ns | 112 B |
+| 1 argument  | **Nilog** | **56.31 ns** `0.78×` | **80 B** `0.71×` |
+| 3 arguments | Microsoft | 120.65 ns | 152 B |
+| 3 arguments | **Nilog** | **72.16 ns** `0.60×` | **104 B** `0.68×` |
 
 ### 📉 Allocation at a glance
 
@@ -187,18 +187,20 @@ disabled   ░░░░░░░░░░░░░░░░░░░░░░░
 
 | Benchmark | Microsoft | Nilog | Result |
 |-----------|----------:|------:|:------:|
-| 100,000 sequential logs | 8.08 ms · 15.96 MB | **6.57 ms** | **1.23× faster** |
-| 50,000 logs across all cores | 1.68 ms · 5.35 MB | **1.42 ms · 3.82 MB** | **1.19× · 29% less RAM** |
+| 100,000 sequential logs | 9.71 ms · 15.22 MB | **7.02 ms · 11.41 MB** | **1.38× faster · 25% less RAM** |
+| 50,000 logs across all cores | 1.60 ms · 5.35 MB | **1.52 ms · 3.82 MB** | **29% less RAM** |
 
 ### 🧰 Scopes & exceptions
 
 | Operation | Mean | Allocated |
 |-----------|-----:|----------:|
-| `WriteScope("RequestId", value)` | 7.98 ns | **0 B** 🟢 |
-| `WriteScope(dictionary)` — 3 entries | 65.14 ns | 152 B |
-| `WriteError(msg, ex, arg)` | 41.59 ns | 72 B |
-| `WriteErrorException(ex)` — summary | 180.5 ns | 992 B |
-| `WriteErrorException(ex, more: true)` — full report | 3.87 µs | 8.3 KB |
+| `WriteScope("RequestId", value)` — single pair | 11.40 ns | 24 B <sup>†</sup> |
+| `WriteScope(dictionary)` — 3 entries | 62.80 ns | 152 B |
+| `WriteError(msg, ex, arg)` | 49.47 ns | 72 B |
+| `WriteErrorException(ex)` — summary | 176.6 ns | 992 B |
+| `WriteErrorException(ex, more: true)` — full report | 4.20 µs | 8.13 KB |
+
+<sub><sup>†</sup> The scope object itself is allocation-free; the 24 B is just boxing the value-type value (`int` here). A reference-type value adds nothing.</sub>
 
 <details>
 <summary><b>📐 Benchmark methodology</b></summary>
@@ -210,9 +212,9 @@ disabled   ░░░░░░░░░░░░░░░░░░░░░░░
 - `[MemoryDiagnoser]` reports managed allocations per operation.
 - Disabled-path numbers use a logger whose `IsEnabled` returns `false`; the call site difference
   (array + boxing vs nothing) is exactly what you see.
-- Default BenchmarkDotNet job (multiple warmup + measurement iterations); the headline numbers
-  have sub-nanosecond/sub-byte error bars.
-- Reproduce: `dotnet run -c Release --project Nilog.Benchmark -f net10.0`
+- Default BenchmarkDotNet job (multiple warmup + measurement iterations). The allocation results
+  are unambiguous (**0 B** on the disabled path); absolute timings vary by machine and runtime.
+- Reproduce: `dotnet run -c Release --project Nilog.Benchmark -f net8.0`
   (one suite: `-- --filter *DisabledBenchmarks*`; quicker: `-- --job short`).
 
 </details>
@@ -285,7 +287,7 @@ A quick map from "what I want to log" to "what to call":
 | Log an error **without** an exception | `logger.WriteError("Bad request")` | none (no args) |
 | Produce a full exception report | `logger.WriteErrorException(ex, "Title", more: true)` | report buffer only |
 | Decide the level at runtime | `Nilogger.Log(logger, level, "…", a, b)` | **none** for 1–3 typed |
-| Attach context to a block | `using (logger.WriteScope("Key", value)) { … }` | **0 B** for a single pair |
+| Attach context to a block | `using (logger.WriteScope("Key", value)) { … }` | only the boxed value (~24 B) |
 
 > [!TIP]
 > Keep templates to **≤ 3 named holes** to stay on the zero-array typed path. For error/critical,
@@ -400,8 +402,10 @@ using (logger.WriteScope("RequestId", requestId))
 }
 ```
 
-Small contexts (≤ 4 entries) take an allocation-light path; a single key/value scope allocates
-**zero bytes**. Values are copied, so mutating your dictionary afterwards never corrupts a scope.
+Small contexts (≤ 4 entries) take an allocation-light path; the scope object itself is
+**allocation-free** (a single key/value pair only costs the unavoidable boxing of a value-type
+value — ~24 B, or nothing for a reference type). Values are copied, so mutating your dictionary
+afterwards never corrupts a scope.
 
 </details>
 
@@ -544,7 +548,7 @@ public sealed class IngestWorker(ILogger<IngestWorker> logger) : BackgroundServi
         {
             var batch = await queue.DequeueAsync(stoppingToken);
 
-            // Trace is usually OFF in prod — with Nilog this line is ~1 ns and 0 bytes.
+            // Trace is usually OFF in prod — with Nilog this line is <1 ns and 0 bytes.
             logger.WriteTrace("Dequeued {Count} messages", batch.Count);
 
             foreach (var msg in batch)
@@ -738,7 +742,7 @@ static void ShutdownUtcTimer();
 ```mermaid
 flowchart LR
     A["logger.WriteInformation(...)"] --> B{"Level enabled?"}
-    B -- No --> C["return immediately<br/><b>0 allocations · ~1 ns</b>"]
+    B -- No --> C["return immediately<br/><b>0 allocations · &lt;1 ns</b>"]
     B -- Yes --> D["wrap args in a<br/>stack-only struct<br/><b>no array</b>"]
     D --> E["ILogger pipeline<br/>named props + OriginalFormat"]
     style C fill:#1f6f3d,color:#fff
@@ -796,9 +800,10 @@ namespaces. `Write*` keeps Nilog unambiguous and lets you use both side by side.
 <details>
 <summary><b>Is it really zero allocation?</b></summary>
 
-On the **disabled path** and for a **single-key scope**, yes — measured at **0 bytes**. On the
-enabled path Nilog still allocates the rendered message string (every logger must), but it avoids
-the `object[]` and, for 1–3 args, any extra carrier — roughly **30% less** than the framework.
+On the **disabled path**, yes — measured at **0 bytes** (and under a nanosecond). On the enabled
+path Nilog still allocates the rendered message string (every logger must), but it avoids the
+`object[]` and, for 1–3 args, any extra carrier — roughly **30% less** than the framework. A
+scope object is allocation-free too; a single value-type value just costs its boxing (~24 B).
 </details>
 
 <details>

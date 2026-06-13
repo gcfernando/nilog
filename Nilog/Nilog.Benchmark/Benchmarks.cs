@@ -1,3 +1,10 @@
+// -----------------------------------------------------------------------------
+//  Nilog benchmarks — the BenchmarkDotNet suites (enabled, disabled, exception,
+//  scope, parallel, stress) comparing Nilog with Microsoft.Extensions.Logging.
+//
+//  File        : Benchmarks.cs
+//  Developer   ::> Gehan Fernando
+// -----------------------------------------------------------------------------
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 using Microsoft.Extensions.Logging;

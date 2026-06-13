@@ -1,3 +1,10 @@
+// -----------------------------------------------------------------------------
+//  Nilog benchmarks — BenchmarkDotNet host entry point that runs the suites
+//  comparing Nilog with the framework's logging extensions.
+//
+//  File        : Program.cs
+//  Developer   ::> Gehan Fernando
+// -----------------------------------------------------------------------------
 // Nilog benchmark host.
 //
 //   Run everything:        dotnet run -c Release --project Nilog.Benchmark -f net10.0

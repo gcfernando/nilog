@@ -1,3 +1,11 @@
+// -----------------------------------------------------------------------------
+//  Nilog tests — covers WriteErrorException / WriteCriticalException, the
+//  default report formatter, inner/aggregate exceptions, and the pluggable
+//  ExceptionFormatter.
+//
+//  File        : ExceptionLoggingTests.cs
+//  Developer   ::> Gehan Fernando
+// -----------------------------------------------------------------------------
 using Microsoft.Extensions.Logging;
 
 namespace Nilog.Tests;
@@ -20,12 +28,12 @@ public class ExceptionLoggingTests
     [Fact]
     public void ErrorException_LogsAtError_WithDefaultFields()
     {
-        var logger = new TestLogger();
-        var ex = Thrown("something failed");
+        TestLogger logger = new();
+        Exception ex = Thrown("something failed");
 
         logger.WriteErrorException(ex);
 
-        var msg = logger.Single.Message;
+        string msg = logger.Single.Message;
         Assert.Equal(LogLevel.Error, logger.Single.Level);
         Assert.Contains("Timestamp", msg);
         Assert.Contains("Title          : System Error", msg);
@@ -37,8 +45,8 @@ public class ExceptionLoggingTests
     [Fact]
     public void CriticalException_LogsAtCritical_WithDefaultTitle()
     {
-        var logger = new TestLogger();
-        var ex = Thrown("fatal failure");
+        TestLogger logger = new();
+        Exception ex = Thrown("fatal failure");
 
         logger.WriteCriticalException(ex);
 
@@ -49,7 +57,7 @@ public class ExceptionLoggingTests
     [Fact]
     public void ErrorException_CustomTitle_IsUsed()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         logger.WriteErrorException(Thrown("x"), title: "Payment Failure");
 
@@ -59,7 +67,7 @@ public class ExceptionLoggingTests
     [Fact]
     public void ErrorException_WithoutDetails_OmitsStackTrace()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         logger.WriteErrorException(Thrown("x"), moreDetailsEnabled: false);
 
@@ -69,7 +77,7 @@ public class ExceptionLoggingTests
     [Fact]
     public void ErrorException_WithDetails_IncludesStackTrace()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         logger.WriteErrorException(Thrown("x"), moreDetailsEnabled: true);
 
@@ -79,7 +87,7 @@ public class ExceptionLoggingTests
     [Fact]
     public void ErrorException_WithDetails_IncludesInnerException()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
         Exception ex;
         try
         {
@@ -106,15 +114,15 @@ public class ExceptionLoggingTests
     [Fact]
     public void ErrorException_WithDetails_ExpandsAggregateException()
     {
-        var logger = new TestLogger();
-        var agg = new AggregateException(
+        TestLogger logger = new();
+        AggregateException agg = new(
             "aggregate root",
             new InvalidOperationException("first branch"),
             new ArgumentException("second branch"));
 
         logger.WriteErrorException(agg, moreDetailsEnabled: true);
 
-        var msg = logger.Single.Message;
+        string msg = logger.Single.Message;
         Assert.Contains("first branch", msg);
         Assert.Contains("second branch", msg);
     }
@@ -122,7 +130,8 @@ public class ExceptionLoggingTests
     [Fact]
     public void ErrorException_WhenDisabled_DoesNothing()
     {
-        var logger = new TestLogger { MinLevel = LogLevel.Critical };
+        TestLogger logger = new()
+        { MinLevel = LogLevel.Critical };
 
         logger.WriteErrorException(Thrown("x"));
 
@@ -132,7 +141,7 @@ public class ExceptionLoggingTests
     [Fact]
     public void CustomExceptionFormatter_IsHonored_ThenResets()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
         try
         {
             Nilogger.ExceptionFormatter = (ex, title, more) => $"CUSTOM|{title}|{ex.Message}|{more}";
@@ -147,7 +156,7 @@ public class ExceptionLoggingTests
             Nilogger.ExceptionFormatter = null!;
         }
 
-        var logger2 = new TestLogger();
+        TestLogger logger2 = new();
         logger2.WriteErrorException(Thrown("again"));
         Assert.Contains("Exception Type", logger2.Single.Message);
     }

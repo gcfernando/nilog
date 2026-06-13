@@ -1,5 +1,10 @@
-using Microsoft.Extensions.Logging;
-
+// -----------------------------------------------------------------------------
+//  Nilog tests — covers message-template parsing: named holes, brace escaping,
+//  alignment/format specifiers, and the raw-template fallback on mismatch.
+//
+//  File        : TemplateTests.cs
+//  Developer   ::> Gehan Fernando
+// -----------------------------------------------------------------------------
 namespace Nilog.Tests;
 
 /// <summary>Covers message-template parsing: names, escapes, alignment/format, and fallback.</summary>
@@ -8,7 +13,7 @@ public class TemplateTests
     [Fact]
     public void NamedPlaceholder_BecomesStructuredKey()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         logger.WriteInformation("Hello {Name}", "world");
 
@@ -19,7 +24,7 @@ public class TemplateTests
     [Fact]
     public void EscapedBraces_AreRenderedLiterally()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         logger.WriteInformation("{{literal}} {Val}", 5);
 
@@ -30,7 +35,7 @@ public class TemplateTests
     [Fact]
     public void FormatSuffix_IsApplied()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         logger.WriteInformation("V={Val:000}", 7);
 
@@ -41,7 +46,7 @@ public class TemplateTests
     [Fact]
     public void AlignmentSuffix_IsApplied()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         logger.WriteInformation("[{Val,5}]", 42);
 
@@ -52,7 +57,7 @@ public class TemplateTests
     [Fact]
     public void TooFewArguments_FallsBackToRawTemplate()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         // Template has two placeholders but only one value is supplied, so string.Format
         // would throw. The formatter must swallow that and return the raw template.
@@ -64,7 +69,7 @@ public class TemplateTests
     [Fact]
     public void NoPlaceholders_WithArg_RendersTemplateText()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         logger.WriteInformation("static text", 99);
 
@@ -74,7 +79,7 @@ public class TemplateTests
     [Fact]
     public void OriginalFormat_IsPreserved()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         logger.WriteInformation("User {Id} did {Action}", 1, "login");
 
@@ -84,7 +89,7 @@ public class TemplateTests
     [Fact]
     public void RepeatedTemplate_UsesCachedFormatter_AndStillRendersEachTime()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         logger.WriteInformation("Value {V}", 1);
         logger.WriteInformation("Value {V}", 2);
@@ -98,7 +103,7 @@ public class TemplateTests
     [Fact]
     public void NullArgument_IsTolerated()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         logger.WriteInformation("Name={Name}", (string?)null);
 

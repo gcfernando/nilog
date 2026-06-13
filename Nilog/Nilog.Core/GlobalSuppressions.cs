@@ -1,3 +1,10 @@
+// -----------------------------------------------------------------------------
+//  Nilog — centralised analyzer suppressions for the deliberate hot-path
+//  trade-offs in the logging code, kept out of the source files themselves.
+//
+//  File        : GlobalSuppressions.cs
+//  Developer   ::> Gehan Fernando
+// -----------------------------------------------------------------------------
 using System.Diagnostics.CodeAnalysis;
 
 

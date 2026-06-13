@@ -1,3 +1,10 @@
+// -----------------------------------------------------------------------------
+//  Nilog tests — covers the Write* extension methods (typed and params forms)
+//  across all six log levels.
+//
+//  File        : ConvenienceTests.cs
+//  Developer   ::> Gehan Fernando
+// -----------------------------------------------------------------------------
 using Microsoft.Extensions.Logging;
 
 namespace Nilog.Tests;
@@ -8,7 +15,7 @@ public class ConvenienceTests
     [Fact]
     public void Trace_Plain_LogsAtTrace()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
         logger.WriteTrace("trace message");
         Assert.Equal(LogLevel.Trace, logger.Single.Level);
         Assert.Equal("trace message", logger.Single.Message);
@@ -17,7 +24,7 @@ public class ConvenienceTests
     [Fact]
     public void Debug_Plain_LogsAtDebug()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
         logger.WriteDebug("debug message");
         Assert.Equal(LogLevel.Debug, logger.Single.Level);
     }
@@ -25,7 +32,7 @@ public class ConvenienceTests
     [Fact]
     public void Information_Plain_LogsAtInformation()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
         logger.WriteInformation("info message");
         Assert.Equal(LogLevel.Information, logger.Single.Level);
     }
@@ -33,7 +40,7 @@ public class ConvenienceTests
     [Fact]
     public void Warning_Plain_LogsAtWarning()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
         logger.WriteWarning("warn message");
         Assert.Equal(LogLevel.Warning, logger.Single.Level);
     }
@@ -41,7 +48,7 @@ public class ConvenienceTests
     [Fact]
     public void Error_Plain_LogsAtError()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
         logger.WriteError("error message");
         Assert.Equal(LogLevel.Error, logger.Single.Level);
     }
@@ -49,7 +56,7 @@ public class ConvenienceTests
     [Fact]
     public void Critical_Plain_LogsAtCritical()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
         logger.WriteCritical("critical message");
         Assert.Equal(LogLevel.Critical, logger.Single.Level);
     }
@@ -57,7 +64,7 @@ public class ConvenienceTests
     [Fact]
     public void Typed_OneArg_BindsToTypedOverload_NoOriginalFormatLoss()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         logger.WriteInformation("User {Id} signed in", 42);
 
@@ -69,7 +76,7 @@ public class ConvenienceTests
     [Fact]
     public void Typed_TwoArgs_Render()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         logger.WriteWarning("Order {Id} total {Amount}", 7, 19.95);
 
@@ -81,7 +88,7 @@ public class ConvenienceTests
     [Fact]
     public void Typed_ThreeArgs_Render()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         logger.WriteDebug("{A} {B} {C}", 1, "two", 3.0);
 
@@ -93,7 +100,7 @@ public class ConvenienceTests
     [Fact]
     public void Params_FourArgs_UsesParamsPath()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         logger.WriteInformation("{A} {B} {C} {D}", 1, 2, 3, 4);
 
@@ -105,8 +112,8 @@ public class ConvenienceTests
     [Fact]
     public void Error_WithException_Typed_AttachesException()
     {
-        var logger = new TestLogger();
-        var ex = new InvalidOperationException("bad");
+        TestLogger logger = new();
+        InvalidOperationException ex = new("bad");
 
         logger.WriteError("Failed for {Id}", ex, 5);
 
@@ -118,8 +125,8 @@ public class ConvenienceTests
     [Fact]
     public void Critical_WithException_Typed_AttachesException()
     {
-        var logger = new TestLogger();
-        var ex = new InvalidOperationException("fatal");
+        TestLogger logger = new();
+        InvalidOperationException ex = new("fatal");
 
         logger.WriteCritical("Crash for {Id}", ex, 9);
 
@@ -130,8 +137,8 @@ public class ConvenienceTests
     [Fact]
     public void Error_WithException_Params_AttachesException()
     {
-        var logger = new TestLogger();
-        var ex = new InvalidOperationException("bad");
+        TestLogger logger = new();
+        InvalidOperationException ex = new("bad");
 
         logger.WriteError("vals {0} {1} {2} {3}", ex, 1, 2, 3, 4);
 
@@ -144,7 +151,8 @@ public class ConvenienceTests
     [InlineData(LogLevel.Warning)]
     public void Convenience_WhenDisabled_DoesNothing(LogLevel min)
     {
-        var logger = new TestLogger { MinLevel = min };
+        TestLogger logger = new()
+        { MinLevel = min };
 
         logger.WriteTrace("t");
         logger.WriteDebug("d");
@@ -156,7 +164,8 @@ public class ConvenienceTests
     [Fact]
     public void Convenience_WhenLoggerFullyDisabled_AllocatesNothingObservable()
     {
-        var logger = new TestLogger { Enabled = false };
+        TestLogger logger = new()
+        { Enabled = false };
 
         logger.WriteTrace("t");
         logger.WriteInformation("i {X}", 1);
@@ -169,7 +178,7 @@ public class ConvenienceTests
     [InlineData(2_000)]
     public void Convenience_RepeatedCalls_AllCaptured(int count)
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         for (int i = 0; i < count; i++)
         {

@@ -1,3 +1,10 @@
+// -----------------------------------------------------------------------------
+//  Nilog tests — covers the async/extensibility hooks (AsyncSinkFilter,
+//  UseAsyncSinkProvider, FlushAsync) and the timestamp-timer shutdown.
+//
+//  File        : HookTests.cs
+//  Developer   ::> Gehan Fernando
+// -----------------------------------------------------------------------------
 using Microsoft.Extensions.Logging;
 
 namespace Nilog.Tests;
@@ -14,7 +21,7 @@ public class HookTests
     [Fact]
     public void UseAsyncSinkProvider_ReplacesFilter_ThenRestore()
     {
-        var original = Nilogger.AsyncSinkFilter;
+        Func<LogLevel, string, Exception, bool> original = Nilogger.AsyncSinkFilter;
         try
         {
             Nilogger.UseAsyncSinkProvider((level, _, _) => level >= LogLevel.Warning);
@@ -31,7 +38,7 @@ public class HookTests
     [Fact]
     public void UseAsyncSinkProvider_Null_LeavesFilterUnchanged()
     {
-        var before = Nilogger.AsyncSinkFilter;
+        Func<LogLevel, string, Exception, bool> before = Nilogger.AsyncSinkFilter;
 
         Nilogger.UseAsyncSinkProvider(null!);
 

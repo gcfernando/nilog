@@ -1,3 +1,10 @@
+// -----------------------------------------------------------------------------
+//  Nilog benchmarks — a bare-bones ILogger that does real formatting work but
+//  no I/O, so benchmarks measure logging cost without console/file noise.
+//
+//  File        : BenchLogger.cs
+//  Developer   ::> Gehan Fernando
+// -----------------------------------------------------------------------------
 using Microsoft.Extensions.Logging;
 
 namespace Nilog.Benchmark;
@@ -14,9 +21,15 @@ public sealed class BenchLogger(bool enabled) : ILogger
     /// <summary>Accumulates work so the JIT cannot eliminate the formatting call.</summary>
     public long Sink;
 
-    public IDisposable BeginScope<TState>(TState state) where TState : notnull => NoScope.Instance;
+    public IDisposable BeginScope<TState>(TState state) where TState : notnull
+    {
+        return NoScope.Instance;
+    }
 
-    public bool IsEnabled(LogLevel logLevel) => enabled;
+    public bool IsEnabled(LogLevel logLevel)
+    {
+        return enabled;
+    }
 
     public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
     {

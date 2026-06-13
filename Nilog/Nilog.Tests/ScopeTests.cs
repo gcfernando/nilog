@@ -1,5 +1,10 @@
-using Microsoft.Extensions.Logging;
-
+// -----------------------------------------------------------------------------
+//  Nilog tests — covers WriteScope for single pairs and dictionaries, including
+//  copy-safety and the empty/no-op scope path.
+//
+//  File        : ScopeTests.cs
+//  Developer   ::> Gehan Fernando
+// -----------------------------------------------------------------------------
 namespace Nilog.Tests;
 
 /// <summary>Covers <c>WriteScope</c> for single pairs and dictionaries.</summary>
@@ -8,15 +13,15 @@ public class ScopeTests
     [Fact]
     public void SingleScope_PushesOnePair()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         using (logger.WriteScope("RequestId", "abc-123"))
         {
             logger.WriteInformation("inside scope");
         }
 
-        var values = TestLogger.ScopeValues(logger.Scopes[0]);
-        Assert.Single(values);
+        IReadOnlyList<KeyValuePair<string, object>> values = TestLogger.ScopeValues(logger.Scopes[0]);
+        _ = Assert.Single(values);
         Assert.Equal("RequestId", values[0].Key);
         Assert.Equal("abc-123", values[0].Value);
         Assert.Equal("RequestId=abc-123", logger.Scopes[0]!.ToString());
@@ -25,7 +30,7 @@ public class ScopeTests
     [Fact]
     public void SingleScope_NullValue_BecomesNA()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
         using (logger.WriteScope("Key", null!))
         {
@@ -37,9 +42,9 @@ public class ScopeTests
     [Fact]
     public void SingleScope_Dispose_IsHonored()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
-        var scope = logger.WriteScope("K", "V");
+        IDisposable scope = logger.WriteScope("K", "V");
         scope.Dispose();
 
         Assert.Equal(1, logger.ScopeDisposeCount);
@@ -48,8 +53,8 @@ public class ScopeTests
     [Fact]
     public void DictionaryScope_Small_PushesAllPairs()
     {
-        var logger = new TestLogger();
-        var ctx = new Dictionary<string, object>
+        TestLogger logger = new();
+        Dictionary<string, object> ctx = new()
         {
             ["User"] = "alice",
             ["Tenant"] = 7,
@@ -59,7 +64,7 @@ public class ScopeTests
         {
         }
 
-        var values = TestLogger.ScopeValues(logger.Scopes[0]);
+        IReadOnlyList<KeyValuePair<string, object>> values = TestLogger.ScopeValues(logger.Scopes[0]);
         Assert.Equal(2, values.Count);
         Assert.Contains(values, kv => kv.Key == "User" && (string)kv.Value == "alice");
         Assert.Contains(values, kv => kv.Key == "Tenant" && (int)kv.Value == 7);
@@ -68,8 +73,8 @@ public class ScopeTests
     [Fact]
     public void DictionaryScope_Large_PushesAllPairs()
     {
-        var logger = new TestLogger();
-        var ctx = new Dictionary<string, object>();
+        TestLogger logger = new();
+        Dictionary<string, object> ctx = [];
         for (int i = 0; i < 10; i++)
         {
             ctx[$"K{i}"] = i;
@@ -79,15 +84,16 @@ public class ScopeTests
         {
         }
 
-        var values = TestLogger.ScopeValues(logger.Scopes[0]);
+        IReadOnlyList<KeyValuePair<string, object>> values = TestLogger.ScopeValues(logger.Scopes[0]);
         Assert.Equal(10, values.Count);
     }
 
     [Fact]
     public void DictionaryScope_NullValue_BecomesNA()
     {
-        var logger = new TestLogger();
-        var ctx = new Dictionary<string, object> { ["K"] = null! };
+        TestLogger logger = new();
+        Dictionary<string, object> ctx = new()
+        { ["K"] = null! };
 
         using (logger.WriteScope(ctx))
         {
@@ -99,9 +105,9 @@ public class ScopeTests
     [Fact]
     public void DictionaryScope_Empty_ReturnsNoOpScope_AndPushesNothing()
     {
-        var logger = new TestLogger();
+        TestLogger logger = new();
 
-        var scope = logger.WriteScope(new Dictionary<string, object>());
+        IDisposable scope = logger.WriteScope(new Dictionary<string, object>());
         scope.Dispose();
 
         Assert.NotNull(scope);
@@ -111,8 +117,9 @@ public class ScopeTests
     [Fact]
     public void DictionaryScope_Copies_SoLaterMutationDoesNotLeak()
     {
-        var logger = new TestLogger();
-        var ctx = new Dictionary<string, object> { ["K"] = "original" };
+        TestLogger logger = new();
+        Dictionary<string, object> ctx = new()
+        { ["K"] = "original" };
 
         using (logger.WriteScope(ctx))
         {

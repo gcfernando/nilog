@@ -1,3 +1,11 @@
+// -----------------------------------------------------------------------------
+//  Nilog tests — a minimal in-memory ILogger that records every entry (level,
+//  message, exception, structured state) and scope, so tests can assert on
+//  exactly what Nilog handed to the sink.
+//
+//  File        : TestLogger.cs
+//  Developer   ::> Gehan Fernando
+// -----------------------------------------------------------------------------
 using Microsoft.Extensions.Logging;
 
 namespace Nilog.Tests;
@@ -23,7 +31,7 @@ internal sealed class TestLogger : ILogger
         {
             get
             {
-                foreach (var kv in State)
+                foreach (KeyValuePair<string, object?> kv in State)
                 {
                     if (kv.Key == key)
                     {
@@ -37,7 +45,7 @@ internal sealed class TestLogger : ILogger
 
         public bool HasKey(string key)
         {
-            foreach (var kv in State)
+            foreach (KeyValuePair<string, object?> kv in State)
             {
                 if (kv.Key == key)
                 {
@@ -70,15 +78,17 @@ internal sealed class TestLogger : ILogger
         return new Tracker(this);
     }
 
-    public bool IsEnabled(LogLevel logLevel) =>
-        Enabled && logLevel != LogLevel.None && logLevel >= MinLevel;
+    public bool IsEnabled(LogLevel logLevel)
+    {
+        return Enabled && logLevel != LogLevel.None && logLevel >= MinLevel;
+    }
 
     public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
     {
-        var kvps = new List<KeyValuePair<string, object?>>();
+        List<KeyValuePair<string, object?>> kvps = [];
         if (state is IEnumerable<KeyValuePair<string, object>> enumerable)
         {
-            foreach (var kv in enumerable)
+            foreach (KeyValuePair<string, object> kv in enumerable)
             {
                 kvps.Add(new KeyValuePair<string, object?>(kv.Key, kv.Value));
             }
@@ -95,8 +105,10 @@ internal sealed class TestLogger : ILogger
     }
 
     /// <summary>Exposes the structured payload of a pushed scope for assertions.</summary>
-    public static IReadOnlyList<KeyValuePair<string, object>> ScopeValues(object? scope) =>
-        (IReadOnlyList<KeyValuePair<string, object>>)scope!;
+    public static IReadOnlyList<KeyValuePair<string, object>> ScopeValues(object? scope)
+    {
+        return (IReadOnlyList<KeyValuePair<string, object>>)scope!;
+    }
 
     private sealed class Tracker(TestLogger owner) : IDisposable
     {

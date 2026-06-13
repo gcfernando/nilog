@@ -1,3 +1,10 @@
+// -----------------------------------------------------------------------------
+//  Nilog — a shared, do-nothing IDisposable scope returned when there is no
+//  context to push, keeping the scope helpers allocation-free on the empty path.
+//
+//  File        : NullScope.cs
+//  Developer   ::> Gehan Fernando
+// -----------------------------------------------------------------------------
 namespace Nilog;
 
 // A shared, do-nothing scope handed back when there is nothing to push (for example an
