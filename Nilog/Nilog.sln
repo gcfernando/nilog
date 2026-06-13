@@ -1,0 +1,48 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.6.11819.183 stable
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nilog.Core", "Nilog.Core\Nilog.Core.csproj", "{7EA1FC0B-E628-4789-827B-C415D58D3F3D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nilog.Tests", "Nilog.Tests\Nilog.Tests.csproj", "{30BB97C5-376A-4331-BEB8-0487EB7134C7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nilog.Benchmark", "Nilog.Benchmark\Nilog.Benchmark.csproj", "{AB6310A6-FDC4-4CC5-80BC-ADE1A7DB53EC}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nilog.Demo", "Nilog.Demo\Nilog.Demo.csproj", "{542D18F9-5780-4CE8-AC17-CFDEA71D96F8}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{5293101C-5361-4039-83D7-DDE07FE8FE8A}"
+	ProjectSection(SolutionItems) = preProject
+		Directory.Build.props = Directory.Build.props
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{7EA1FC0B-E628-4789-827B-C415D58D3F3D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7EA1FC0B-E628-4789-827B-C415D58D3F3D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7EA1FC0B-E628-4789-827B-C415D58D3F3D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7EA1FC0B-E628-4789-827B-C415D58D3F3D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{30BB97C5-376A-4331-BEB8-0487EB7134C7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{30BB97C5-376A-4331-BEB8-0487EB7134C7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{30BB97C5-376A-4331-BEB8-0487EB7134C7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{30BB97C5-376A-4331-BEB8-0487EB7134C7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AB6310A6-FDC4-4CC5-80BC-ADE1A7DB53EC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AB6310A6-FDC4-4CC5-80BC-ADE1A7DB53EC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AB6310A6-FDC4-4CC5-80BC-ADE1A7DB53EC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AB6310A6-FDC4-4CC5-80BC-ADE1A7DB53EC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{542D18F9-5780-4CE8-AC17-CFDEA71D96F8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{542D18F9-5780-4CE8-AC17-CFDEA71D96F8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{542D18F9-5780-4CE8-AC17-CFDEA71D96F8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{542D18F9-5780-4CE8-AC17-CFDEA71D96F8}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {9444A983-60E5-4DAF-B122-F076324EAA41}
+	EndGlobalSection
+EndGlobal
