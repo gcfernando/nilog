@@ -372,6 +372,17 @@ Stack Trace    :
 > Message        : profile 'alice' not found in cache
 ```
 
+> [!NOTE]
+> **Seeing the report squashed onto one line in the console?** That's the console formatter,
+> not Nilog — Nilog always emits the full multi-line text. Microsoft's `SimpleConsole` replaces
+> every newline with a space when `SingleLine = true`. Use `o.SingleLine = false` (the default)
+> to keep the layout above. File sinks, Azure (App Insights / Log Analytics), Seq, and JSON/
+> structured sinks all preserve the line breaks regardless.
+>
+> ```csharp
+> builder.AddSimpleConsole(o => o.SingleLine = false); // keep multi-line reports
+> ```
+
 Don't like the format? Swap it out globally (set it back to `null` to restore the default):
 
 ```csharp

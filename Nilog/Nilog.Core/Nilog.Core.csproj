@@ -15,7 +15,7 @@
 		<Description>Zero-allocation, high-performance logging extensions for Microsoft.Extensions.Logging. Strongly-typed overloads that eliminate the params object[] allocation and allocate nothing when a level is disabled.</Description>
 		<PackageTags>logging;performance;high-performance;zero-allocation;ilogger;structured-logging;loggermessage</PackageTags>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
-		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<PackageReadmeFile>README.nuget.md</PackageReadmeFile>
 		<PackageProjectUrl>https://github.com/gcfernando/Nilog</PackageProjectUrl>
 		<RepositoryUrl>https://github.com/gcfernando/Nilog</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
@@ -34,9 +34,10 @@
 		<PackageReference Include="Microsoft.Extensions.ObjectPool" Version="10.0.9" />
 	</ItemGroup>
 
-	<!-- Pack the README shown on the NuGet package page (PackageReadmeFile above points here). -->
+	<!-- nuget.org README: a Markdown-only copy (no mermaid / GitHub alerts / <details>, which
+	     nuget.org does not render). The rich README.md remains the GitHub landing page. -->
 	<ItemGroup>
-		<None Include="..\README.md" Pack="true" PackagePath="\" />
+		<None Include="..\README.nuget.md" Pack="true" PackagePath="\" />
 	</ItemGroup>
 
 	<ItemGroup>

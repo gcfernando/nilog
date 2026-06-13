@@ -30,7 +30,10 @@ using ILoggerFactory loggerFactory = LoggerFactory.Create(builder =>
         .SetMinimumLevel(LogLevel.Trace)
         .AddSimpleConsole(o =>
         {
-            o.SingleLine = true;
+            // Keep SingleLine = false (the default): the console formatter replaces every
+            // newline with a space when SingleLine is true, which would flatten multi-line
+            // output such as the exception reports in section 6 onto one line.
+            o.SingleLine = false;
             o.TimestampFormat = "HH:mm:ss ";
         });
 });
