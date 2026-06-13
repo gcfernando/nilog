@@ -850,7 +850,7 @@ dotnet build -c Release
 # Run the unit tests (81 tests, all green on net8/9/10)
 dotnet test
 
-# See every feature in action
+# See every feature in action — a real-world e-commerce checkout walkthrough
 dotnet run -c Release --project Nilog.Demo -f net10.0
 
 # Reproduce the benchmarks above
@@ -865,7 +865,7 @@ dotnet run -c Release --project Nilog.Benchmark -f net10.0
 |---------|------------|
 | `Nilog.Core` | the library (packs as `Nilog`) |
 | `Nilog.Tests` | xUnit suite, 81 tests across net8/9/10 |
-| `Nilog.Demo` | runnable, commented feature tour |
+| `Nilog.Demo` | runnable, commented tour — every feature against a real-world checkout scenario |
 | `Nilog.Benchmark` | BenchmarkDotNet suites behind every number above |
 
 ---
