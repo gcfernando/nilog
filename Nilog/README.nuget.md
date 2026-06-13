@@ -4,8 +4,7 @@
 
 **Same `ILogger`. Same `{Named}` templates. None of the garbage.**
 
-[![NuGet](https://img.shields.io/nuget/v/Nilog.svg?logo=nuget&label=NuGet&color=004880)](https://www.nuget.org/packages/Nilog)
-[![Downloads](https://img.shields.io/nuget/dt/Nilog.svg?logo=nuget&label=Downloads&color=004880)](https://www.nuget.org/packages/Nilog)
+[![NuGet](https://img.shields.io/badge/NuGet-v1.0.0-004880?logo=nuget&logoColor=white)](https://www.nuget.org/packages/Nilog)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/gcfernando/Nilog/blob/main/LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%209.0%20%7C%2010.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com)
 

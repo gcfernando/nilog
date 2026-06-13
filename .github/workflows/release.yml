@@ -86,7 +86,7 @@ jobs:
       version: ${{ steps.ver.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # Resolve the version (strip a leading "v") from whichever trigger fired:
       #   push tag     -> github.ref_name        (e.g. v1.2.3)
@@ -134,7 +134,7 @@ jobs:
           Write-Host "----- release notes for v$ver -----`n$notes"
 
       - name: UploadReleaseNotes
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-notes
           path: release-notes.md
@@ -149,10 +149,10 @@ jobs:
     needs: metadata
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: SetupDotnetSdks
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: |
             8.0.x
@@ -180,10 +180,10 @@ jobs:
     needs: [metadata, test]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: SetupDotnetSdks
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: |
             8.0.x
@@ -203,7 +203,7 @@ jobs:
 
       # Bring back the CHANGELOG notes so they can be embedded in the package.
       - name: DownloadReleaseNotes
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: release-notes
 
@@ -244,7 +244,7 @@ jobs:
           Get-ChildItem artifacts | Format-Table Name, Length
 
       - name: UploadPackageArtifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nuget-package
           path: |
@@ -263,10 +263,10 @@ jobs:
     needs: [metadata, test]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: SetupDotnetSdks
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: |
             8.0.x
@@ -299,7 +299,7 @@ jobs:
           }
 
       - name: UploadDemoArtifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: demo-app
           path: artifacts/Nilog.Demo-*.zip
@@ -317,19 +317,19 @@ jobs:
     if: ${{ github.event_name == 'push' || github.event_name == 'release' }}
     steps:
       - name: DownloadPackageArtifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: nuget-package
           path: artifacts
 
       - name: DownloadDemoArtifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: demo-app
           path: artifacts
 
       - name: DownloadReleaseNotes
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: release-notes
 
@@ -362,12 +362,12 @@ jobs:
     if: ${{ github.event_name == 'push' || github.event_name == 'release' }}
     steps:
       - name: SetupDotnetSdk
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 8.0.x
 
       - name: DownloadPackageArtifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: nuget-package
           path: artifacts
