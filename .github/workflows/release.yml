@@ -1,0 +1,401 @@
+# -----------------------------------------------------------------------------
+#  Release pipeline for Nilog.
+#
+#  Fires either when you push a version tag with plain git:
+#      git tag v1.2.3
+#      git push origin v1.2.3        # <- the workflow CREATES the Release for you
+#  ...or when you publish a Release from the GitHub UI. Either way the tag
+#  (e.g. v1.2.3) becomes the package version.
+#
+#  The pipeline is split into focused jobs that hand work to each other through
+#  job outputs and uploaded artifacts:
+#
+#      metadata ─► test ─┬─► package ─┐
+#                        └─► demo ────┴─► release ─► publish-nuget
+#
+#    * metadata       resolves the version and the CHANGELOG release notes once.
+#    * test           builds the library and runs the unit tests (the gate).
+#    * package        produces the NuGet package, symbols, and per-TFM DLL zips.
+#    * demo           publishes the self-contained feature-tour demo (linux + win).
+#    * release        creates the GitHub Release and attaches every artifact.
+#    * publish-nuget  pushes the package to NuGet.org.
+#
+#  package and demo run in parallel once test passes, so a release is as fast as
+#  its slowest branch rather than the sum of every step.
+#
+#  Produces and attaches to the Release (so anyone can download from the repo's
+#  Releases page — no NuGet account needed):
+#    * Nilog.<ver>.nupkg          — one NuGet package containing every target
+#                                   framework (net8.0 + net9.0 + net10.0).
+#    * Nilog.<ver>.snupkg         — debug symbols package.
+#    * Nilog-<ver>-<tfm>.zip      — raw Nilog.dll + XML docs per framework, for
+#                                   people who want a single TFM directly.
+#    * Nilog.Demo-<ver>-<rid>.zip — runnable, self-contained feature tour
+#                                   (linux-x64 and win-x64).
+#
+#  Nilog is a cross-platform library (no Windows dependency), so every job runs
+#  on Linux — faster and cheaper than Windows runners.
+# -----------------------------------------------------------------------------
+
+name: Release
+
+on:
+  # A) Push a version tag with plain git — the workflow creates the Release:
+  #      git tag v1.2.3 && git push origin v1.2.3
+  push:
+    tags:
+      - "v*"
+  # B) Or publish a Release from the GitHub UI.
+  release:
+    types: [published]
+  # C) Manual run for testing (builds artifacts; does not touch a Release).
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (e.g. 1.2.3)"
+        required: true
+
+# Needed so the release job can upload assets onto the Release.
+permissions:
+  contents: write
+
+# Serialise releases for the same ref. cancel-in-progress is intentionally false:
+# a run that has reached the publish stage must never be killed mid-flight, since a
+# NuGet push cannot be rolled back. Overlapping runs queue instead of racing.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
+  SOLUTION: Nilog/Nilog.sln
+  LIBRARY: Nilog/Nilog.Core/Nilog.Core.csproj
+  TESTS: Nilog/Nilog.Tests/Nilog.Tests.csproj
+  DEMO: Nilog/Nilog.Demo/Nilog.Demo.csproj
+
+jobs:
+  # ---------------------------------------------------------------------------
+  #  metadata — resolve the version and CHANGELOG notes ONCE, then share them
+  #  with every downstream job via an output (version) and an artifact (notes).
+  # ---------------------------------------------------------------------------
+  metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Resolve the version (strip a leading "v") from whichever trigger fired:
+      #   push tag     -> github.ref_name        (e.g. v1.2.3)
+      #   release      -> release.tag_name
+      #   manual run   -> the version input
+      - name: DetermineVersion
+        id: ver
+        shell: pwsh
+        run: |
+          switch ($env:GITHUB_EVENT_NAME) {
+            'push'    { $v = '${{ github.ref_name }}' }
+            'release' { $v = '${{ github.event.release.tag_name }}' }
+            default   { $v = '${{ github.event.inputs.version }}' }
+          }
+          $v = $v -replace '^v', ''
+          if ([string]::IsNullOrWhiteSpace($v)) { throw "Could not resolve a version." }
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Building version $v"
+
+      # Pull the CHANGELOG section for THIS version once, so it can be embedded
+      # BOTH in the NuGet package (as release notes) and in the GitHub Release
+      # body. Always runs; falls back to a short note if the section is missing.
+      - name: ExtractReleaseNotesFromChangelog
+        shell: pwsh
+        run: |
+          $ver  = '${{ steps.ver.outputs.version }}'
+          $path = 'CHANGELOG.md'
+          $buf  = @()
+          if (Test-Path $path) {
+            $capture = $false
+            foreach ($line in Get-Content $path) {
+              if ($line -match '^##\s+\[') {
+                if ($capture) { break }   # next version section -> stop
+                if ($line -match "^##\s+\[$([regex]::Escape($ver))\]") { $capture = $true; continue }
+              }
+              if ($capture) { $buf += $line }
+            }
+          }
+          $notes = ($buf -join "`n").Trim()
+          if ([string]::IsNullOrWhiteSpace($notes)) {
+            $notes = "Release v$ver. See CHANGELOG.md for details."
+            Write-Warning "No CHANGELOG section found for $ver; using a fallback."
+          }
+          Set-Content -Path release-notes.md -Value $notes -Encoding utf8
+          Write-Host "----- release notes for v$ver -----`n$notes"
+
+      - name: UploadReleaseNotes
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  #  test — the quality gate. Builds the library and runs the unit tests across
+  #  every target framework; the packaging jobs depend on this passing.
+  # ---------------------------------------------------------------------------
+  test:
+    runs-on: ubuntu-latest
+    needs: metadata
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: SetupDotnetSdks
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore ${{ env.TESTS }}
+
+      # Build + run the xUnit suite (net8.0 / net9.0 / net10.0). A failure here
+      # stops the release. Building the test project also builds the library.
+      - name: Test
+        run: >
+          dotnet test ${{ env.TESTS }}
+          --configuration Release
+          --no-restore
+          -p:ContinuousIntegrationBuild=true
+
+  # ---------------------------------------------------------------------------
+  #  package — build the NuGet package (+ symbols) and a per-framework DLL zip.
+  #  Runs in parallel with the demo job once the tests pass.
+  # ---------------------------------------------------------------------------
+  package:
+    runs-on: ubuntu-latest
+    needs: [metadata, test]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: SetupDotnetSdks
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore ${{ env.LIBRARY }}
+
+      - name: BuildLibrary
+        run: >
+          dotnet build ${{ env.LIBRARY }}
+          --configuration Release
+          --no-restore
+          -p:Version=${{ needs.metadata.outputs.version }}
+          -p:ContinuousIntegrationBuild=true
+
+      # Bring back the CHANGELOG notes so they can be embedded in the package.
+      - name: DownloadReleaseNotes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+
+      # Produce the NuGet package (+ symbols). One .nupkg holds every TFM, and the
+      # CHANGELOG section is embedded as the package's release notes — MSBuild reads
+      # the PackageReleaseNotes environment variable as the matching property.
+      - name: PackNugetPackage
+        shell: pwsh
+        run: |
+          $env:PackageReleaseNotes = Get-Content release-notes.md -Raw
+          dotnet pack ${{ env.LIBRARY }} `
+            --configuration Release `
+            --no-build `
+            --output artifacts `
+            -p:Version=${{ needs.metadata.outputs.version }} `
+            -p:PackageVersion=${{ needs.metadata.outputs.version }}
+
+      # Zip the built Nilog.dll + XML docs for each target framework individually,
+      # so the Release page offers a direct per-framework download.
+      - name: PackagePerTargetFrameworkDlls
+        shell: pwsh
+        run: |
+          $ver  = '${{ needs.metadata.outputs.version }}'
+          $tfms = 'net8.0','net9.0','net10.0'
+          $bin  = 'Nilog/Nilog.Core/bin/Release'
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          foreach ($t in $tfms) {
+            $src = Join-Path $bin $t
+            if (-not (Test-Path $src)) { Write-Warning "Missing output for $t ($src)"; continue }
+            $wanted = 'Nilog.dll','Nilog.xml','Nilog.pdb'
+            $files  = Get-ChildItem -Path $src -File | Where-Object { $wanted -contains $_.Name }
+            if (-not $files) { Write-Warning "No files to zip for $t"; continue }
+            $zip = "artifacts/Nilog-$ver-$t.zip"
+            Compress-Archive -Path $files.FullName -DestinationPath $zip -Force
+            Write-Host "Created $zip"
+          }
+          Write-Host "`nPackage artifacts:"
+          Get-ChildItem artifacts | Format-Table Name, Length
+
+      - name: UploadPackageArtifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-package
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+            artifacts/Nilog-*.zip
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  #  demo — publish the feature-tour console app as a self-contained binary for
+  #  Linux and Windows, so anyone can download the matching zip, unzip, and run
+  #  it WITHOUT installing .NET. Runs in parallel with the package job.
+  # ---------------------------------------------------------------------------
+  demo:
+    runs-on: ubuntu-latest
+    needs: [metadata, test]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: SetupDotnetSdks
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: RestoreDemo
+        run: dotnet restore ${{ env.DEMO }}
+
+      - name: PublishDemoApp
+        shell: pwsh
+        run: |
+          $ver  = '${{ needs.metadata.outputs.version }}'
+          $rids = 'linux-x64','win-x64'
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          foreach ($rid in $rids) {
+            $out = "publish/demo-$rid"
+            dotnet publish ${{ env.DEMO }} `
+              --configuration Release `
+              --framework net10.0 `
+              --runtime $rid `
+              --self-contained true `
+              -p:PublishSingleFile=true `
+              -p:IncludeNativeLibrariesForSelfExtract=true `
+              -p:Version=$ver `
+              --output $out
+            Compress-Archive -Path "$out/*" `
+              -DestinationPath "artifacts/Nilog.Demo-$ver-$rid.zip" -Force
+            Write-Host "Created artifacts/Nilog.Demo-$ver-$rid.zip"
+          }
+
+      - name: UploadDemoArtifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-app
+          path: artifacts/Nilog.Demo-*.zip
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  #  release — gather every artifact and publish the GitHub Release. Skipped on
+  #  manual (workflow_dispatch) runs, which only build the artifacts.
+  #    * On a tag push, this CREATES the Release for the tag automatically.
+  #    * On a UI release, it adds the assets to the existing Release.
+  # ---------------------------------------------------------------------------
+  release:
+    runs-on: ubuntu-latest
+    needs: [metadata, package, demo]
+    if: ${{ github.event_name == 'push' || github.event_name == 'release' }}
+    steps:
+      - name: DownloadPackageArtifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-package
+          path: artifacts
+
+      - name: DownloadDemoArtifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: demo-app
+          path: artifacts
+
+      - name: DownloadReleaseNotes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+
+      - name: ListArtifacts
+        run: ls -lh artifacts
+
+      # The curated CHANGELOG section becomes the body; generate_release_notes
+      # then appends an auto "Full Changelog" compare link beneath it.
+      - name: PublishReleaseAndAttachAssets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.metadata.outputs.version }}
+          name: Nilog v${{ needs.metadata.outputs.version }}
+          body_path: release-notes.md
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+            artifacts/*.zip
+
+  # ---------------------------------------------------------------------------
+  #  publish-nuget — push the package to NuGet.org. Runs only after a successful
+  #  Release, and only when the NUGET_API_KEY secret exists, so forks and manual
+  #  test runs never publish. The matching .snupkg is uploaded automatically.
+  # ---------------------------------------------------------------------------
+  publish-nuget:
+    runs-on: ubuntu-latest
+    needs: [metadata, release]
+    if: ${{ github.event_name == 'push' || github.event_name == 'release' }}
+    steps:
+      - name: SetupDotnetSdk
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: DownloadPackageArtifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-package
+          path: artifacts
+
+      # --skip-duplicate makes re-runs safe (re-tagging or re-running won't fail
+      # if the version is already on NuGet).
+      - name: PushToNugetOrg
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:NUGET_API_KEY)) {
+            Write-Warning "NUGET_API_KEY secret is not set — skipping NuGet.org publish."
+            exit 0
+          }
+          # Resolve the real package file(s) ourselves — dotnet nuget push does not
+          # reliably expand a quoted "artifacts/*.nupkg" wildcard and would report
+          # "File does not exist". The matching .snupkg is uploaded automatically.
+          $packages = Get-ChildItem -Path artifacts -File | Where-Object { $_.Extension -eq '.nupkg' }
+          if (-not $packages) {
+            Write-Error "No .nupkg found in 'artifacts' — nothing to publish."
+            exit 1
+          }
+          foreach ($pkg in $packages) {
+            Write-Host "Pushing $($pkg.Name)…"
+            dotnet nuget push $pkg.FullName `
+              --api-key $env:NUGET_API_KEY `
+              --source https://api.nuget.org/v3/index.json `
+              --skip-duplicate
+            if ($LASTEXITCODE -ne 0) { throw "nuget push failed for $($pkg.Name)" }
+          }

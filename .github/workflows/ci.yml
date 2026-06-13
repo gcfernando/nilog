@@ -1,0 +1,61 @@
+# -----------------------------------------------------------------------------
+#  Continuous integration for Nilog.
+#
+#  Runs on every push to main and on every pull request: restores, builds the
+#  library in Release (which enforces TreatWarningsAsErrors), and runs the full
+#  xUnit suite across net8.0 / net9.0 / net10.0. This is the gate that keeps main
+#  green; the Release workflow re-runs the same tests before publishing.
+#
+#  Nilog is cross-platform, so CI runs on Linux.
+# -----------------------------------------------------------------------------
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel an in-flight run for the same branch/PR when a newer commit arrives.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: SetupDotnetSdks
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore Nilog/Nilog.sln
+
+      # Release build of the library enforces TreatWarningsAsErrors + analyzers.
+      - name: BuildLibrary
+        run: >
+          dotnet build Nilog/Nilog.Core/Nilog.Core.csproj
+          --configuration Release
+          --no-restore
+
+      - name: Test
+        run: >
+          dotnet test Nilog/Nilog.Tests/Nilog.Tests.csproj
+          --configuration Release
+          --no-restore
+          --verbosity normal
