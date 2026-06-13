@@ -1,0 +1,13 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/Nilog/.vs/Nilog
+/Nilog/Nilog.Benchmark/bin
+/Nilog/Nilog.Benchmark/obj
+/Nilog/Nilog.Core/bin
+/Nilog/Nilog.Core/obj
+/Nilog/Nilog.Demo/bin
+/Nilog/Nilog.Demo/obj
+/Nilog/Nilog.Tests/bin
+/Nilog/Nilog.Tests/obj
