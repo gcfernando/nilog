@@ -570,6 +570,70 @@ public sealed class IngestWorker(ILogger<IngestWorker> logger) : BackgroundServi
 }
 ```
 
+### Azure Functions (isolated worker)
+
+Wire Nilog the way a real function app would: set the global hooks **once** at startup, choose the
+minimum level by **build configuration**, and open a correlation **scope per invocation** with
+worker middleware — so functions *and* injected services log through `ILogger<T>` and inherit it.
+
+```csharp
+// Program.cs
+var builder = FunctionsApplication.CreateBuilder(args);
+builder.ConfigureFunctionsWebApplication();
+
+// Minimum level by build configuration — chatty in Debug, lean in Release.
+#if DEBUG
+builder.Logging.SetMinimumLevel(LogLevel.Debug);
+#else
+builder.Logging.SetMinimumLevel(LogLevel.Information);
+#endif
+
+// Global Nilog hooks — set once, process-wide.
+Nilogger.ExceptionFormatter = (ex, title, verbose) => /* JSON for App Insights */ ...;
+Nilogger.UseAsyncSinkProvider((level, _, _) => level >= LogLevel.Warning);
+
+builder.UseMiddleware<RequestLoggingMiddleware>();   // correlation scope per invocation
+
+var app = builder.Build();
+
+// Drain buffered async work + stop the timestamp timer on graceful shutdown.
+app.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping.Register(() =>
+{
+    Nilogger.FlushAsync().GetAwaiter().GetResult();
+    Nilogger.ShutdownUtcTimer();
+});
+
+app.Run();
+```
+
+```csharp
+// One scope wraps the whole invocation — every line (in functions AND services)
+// carries CorrelationId + Function without repeating them.
+public sealed class RequestLoggingMiddleware(ILogger<RequestLoggingMiddleware> logger)
+    : IFunctionsWorkerMiddleware
+{
+    public async Task Invoke(FunctionContext context, FunctionExecutionDelegate next)
+    {
+        using (logger.WriteScope(new Dictionary<string, object>
+        {
+            ["CorrelationId"] = context.InvocationId,
+            ["Function"] = context.FunctionDefinition.Name,
+        }))
+        {
+            try { await next(context); }
+            catch (Exception ex)
+            {
+                logger.WriteCriticalException(ex, "unhandled.function.exception", moreDetailsEnabled: true);
+                throw;
+            }
+        }
+    }
+}
+```
+
+> The full runnable version lives in [`Nilog.Function`](Nilog/Nilog.Function) — an HTTP checkout
+> service (`POST /api/orders`) that exercises every Nilog feature against a real flow.
+
 ### Custom JSON exception reports
 
 ```csharp
@@ -865,6 +929,7 @@ dotnet run -c Release --project Nilog.Benchmark -f net10.0
 | `Nilog.Core` | the library (packs as `Nilog`) |
 | `Nilog.Tests` | xUnit suite, 81 tests across net8/9/10 |
 | `Nilog.Demo` | runnable, commented tour — every feature against a real-world checkout scenario |
+| `Nilog.Function` | Azure Functions (isolated worker) sample — middleware correlation scopes, config-based levels, the full API in a real HTTP checkout service |
 | `Nilog.Benchmark` | BenchmarkDotNet suites behind every number above |
 
 ---
