@@ -62,9 +62,9 @@ Section("1. The six levels — a service starting up and handling load");
     startup.WriteCritical("Redis connection pool exhausted — shedding load");
 }
 
-Section("2. Structured logging with typed arguments (1–3, zero array allocation)");
+Section("2. Structured logging with typed arguments (1–4, zero array allocation)");
 {
-    // One to three values bind to strongly-typed overloads: no object[] is built,
+    // One to four values bind to strongly-typed overloads: no object[] is built,
     // and {Named} placeholders flow through as structured properties to your sink.
     orders.WriteInformation("Order {OrderId} placed by customer {CustomerId}", orderId, customerId);
 
@@ -72,11 +72,17 @@ Section("2. Structured logging with typed arguments (1–3, zero array allocatio
     payments.WriteInformation("Authorized {Amount:N2} {Currency} on card ending {Last4}", 129.95m, "EUR", "4242");
 
     orders.WriteInformation("Order {OrderId}: {ItemCount} items, total {Total:N2} EUR", orderId, 3, 129.95m);
+
+    // Four-argument typed overload — zero object[], zero boxing on the disabled path.
+    // Real scenario: user performed an action in a region, iteration count included.
+    shipping.WriteInformation(
+        "User {UserId} shipped order {OrderId} to {Region} — attempt #{Attempt}",
+        customerId, orderId, "EU-WEST", 1);
 }
 
-Section("3. More than three values — the familiar params path");
+Section("3. More than four values — the familiar params path");
 {
-    // Four+ arguments transparently use the params object[] overload (one array,
+    // Five+ arguments transparently use the params object[] overload (one array,
     // exactly like the framework). Handy when an event genuinely has many fields.
     var shipmentId = Guid.Parse("1a2b3c4d-5e6f-4071-8899-aabbccddeeff");
     shipping.WriteInformation(
@@ -92,17 +98,44 @@ Section("4. Runtime log level — Nilogger.Log when severity is decided in code"
     LogRequest(http, "POST", "/api/payments", 502, 3070);
 }
 
-Section("5. Logging an exception together with business context");
+Section("5. WriteError / WriteCritical — all three call forms");
 {
+    // ── Form 1: WITH exception + typed args ─────────────────────────────────────
+    // The most common form in business error handling. Exception is attached to the
+    // log entry (structured sinks can index it). Args are typed, zero-array.
     try
     {
         ChargeCard(orderId, amountEur: 129.95m, cardLast4: "0341");
     }
     catch (PaymentDeclinedException ex)
     {
-        // Typed overload (message + exception + 2 args): exception attached, zero array.
         payments.WriteError("Payment declined for order {OrderId}: {Reason}", ex, orderId, ex.Reason);
     }
+
+    // ── Form 2: WITH exception, plain message (Feature C — fast path) ───────────
+    // No template placeholders means no args to bind; Nilog resolves directly to the
+    // no-args with-exception overload — faster than any params form.
+    try
+    {
+        VerifyInventoryNode(orderId);
+    }
+    catch (Exception ex)
+    {
+        inventory.WriteError("Inventory node check failed — circuit breaker open", ex);
+    }
+
+    // ── Form 3: WITHOUT exception, typed args (v1.0.1 NEW) ──────────────────────
+    // Before v1.0.1, `WriteError("Failed {Id}", id)` fell back to params object[],
+    // boxing the int and building an array. Now it routes to the typed overload
+    // (same zero-array path as WriteInformation/WriteWarning) via
+    // [OverloadResolutionPriority(-1)] — the compiler only picks it when no
+    // with-exception overload is applicable at priority 0.
+    orders.WriteError("Order {OrderId} exceeds line-count limit: {Count} lines (max 50)",
+        orderId, 51);
+    payments.WriteError("Idempotency key collision for merchant {MerchantId}", "MERCH-9912");
+
+    // WriteCritical has the same three forms — shown here with the new typed path.
+    startup.WriteCritical("Config reload failed: missing required key {Key}", "ConnectionStrings:Primary");
 }
 
 Section("6. Rich exception reports — full diagnostics for the on-call engineer");
@@ -136,7 +169,7 @@ Section("7. Custom exception format — emit JSON for a structured sink");
     Nilogger.ExceptionFormatter = (ex, title, verbose) => JsonSerializer.Serialize(new
     {
         title,
-        type = ex.GetType().FullName,
+        type = ex.GetType().FullName ?? ex.GetType().Name,
         ex.Message,
         inner = ex.InnerException?.Message,
         stack = verbose ? ex.StackTrace : null,
@@ -176,6 +209,19 @@ Section("8. Scopes — correlate every line in a request without repeating yours
         {
             orders.WriteInformation("Order {OrderId} created", orderId);
             payments.WriteInformation("Payment captured for order {OrderId}", orderId);
+        }
+
+        // Feature A: IReadOnlyDictionary (and any IEnumerable<KVP>) routes to the
+        // IEnumerable overload. Dictionary<K,V> typed as IDictionary still uses the
+        // more-derived IDictionary overload, so existing callers are unaffected.
+        IReadOnlyDictionary<string, object> traceCtx = new Dictionary<string, object>
+        {
+            ["TraceId"] = "4bf92f3577b34da6a3ce929d0e0e4736",
+            ["SpanId"] = "00f067aa0ba902b7",
+        };
+        using (http.WriteScope(traceCtx))
+        {
+            orders.WriteInformation("Distributed trace context propagated");
         }
 
         http.WriteInformation("Responded 201 Created in 128 ms");
@@ -308,6 +354,13 @@ static void Section(string title)
 {
     Console.WriteLine();
     Console.WriteLine("== " + title + " " + new string('=', Math.Max(0, 78 - title.Length)));
+}
+
+// Simulates an inventory node health check that times out.
+static void VerifyInventoryNode(Guid orderId)
+{
+    _ = orderId;
+    throw new TimeoutException("inventory-node-1:6379 did not respond within 200 ms");
 }
 
 // A domain-specific exception, the kind you would define in a real payments module.

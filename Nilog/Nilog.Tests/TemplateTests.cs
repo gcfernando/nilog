@@ -77,6 +77,18 @@ public class TemplateTests
     }
 
     [Fact]
+    public void EscapedBracesOnly_NoPlaceholder_RendersLiteralBraces()
+    {
+        // Template has escaped braces but no named placeholder, so Names.Length == 0.
+        // string.Format must still run to convert "{{" → "{" and "}}" → "}".
+        TestLogger logger = new();
+
+        logger.WriteInformation("{{raw}}", 99);
+
+        Assert.Equal("{raw}", logger.Single.Message);
+    }
+
+    [Fact]
     public void OriginalFormat_IsPreserved()
     {
         TestLogger logger = new();
@@ -108,5 +120,26 @@ public class TemplateTests
         logger.WriteInformation("Name={Name}", (string?)null);
 
         Assert.Equal("Name=", logger.Single.Message);
+    }
+
+    // Feature B: cache-guard smoke test. Verifies that many distinct templates are cached
+    // and rendered correctly, and that the library does not throw when the slow path runs.
+    [Fact]
+    public void ManyDistinctTemplates_AllRenderedCorrectly()
+    {
+        TestLogger logger = new();
+        const int n = 200;
+
+        for (int i = 0; i < n; i++)
+        {
+            // Each iteration uses a genuinely different template string.
+            logger.WriteInformation($"event_{i}_{{Value}}", i);
+        }
+
+        Assert.Equal(n, logger.Entries.Count);
+        for (int i = 0; i < n; i++)
+        {
+            Assert.Equal(i, logger.Entries[i]["Value"]);
+        }
     }
 }

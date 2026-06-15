@@ -128,6 +128,28 @@ public class ExceptionLoggingTests
     }
 
     [Fact]
+    public void WriteErrorException_AttachesExceptionObjectToEntry()
+    {
+        TestLogger logger = new();
+        Exception ex = Thrown("attached");
+
+        logger.WriteErrorException(ex);
+
+        Assert.Same(ex, logger.Single.Exception);
+    }
+
+    [Fact]
+    public void WriteCriticalException_AttachesExceptionObjectToEntry()
+    {
+        TestLogger logger = new();
+        Exception ex = Thrown("attached critical");
+
+        logger.WriteCriticalException(ex);
+
+        Assert.Same(ex, logger.Single.Exception);
+    }
+
+    [Fact]
     public void ErrorException_WhenDisabled_DoesNothing()
     {
         TestLogger logger = new()

@@ -40,8 +40,6 @@ namespace Nilog;
 /// </remarks>
 public static class Nilogger
 {
-    private const string _message = "{Message}";
-
     // Best-effort cleanup: stop the timestamp cache timer when the process or AppDomain
     // is going away so we don't leave a stray timer running during shutdown.
     static Nilogger()
@@ -52,9 +50,8 @@ public static class Nilogger
 
     #region Cached EventIds (single source of truth)
 
-    // One EventId per level, created once and reused everywhere. Both the pre-compiled
-    // delegates below and GetEventId read from these fields, so a given level always
-    // emits the same EventId no matter which overload produced the entry.
+    // One EventId per level, created once and reused everywhere. GetEventId reads from
+    // these fields so a given level always emits the same EventId regardless of overload.
     private static readonly EventId _traceId = new(0, "TraceEvent");
     private static readonly EventId _debugId = new(1, "DebugEvent");
     private static readonly EventId _infoId = new(2, "InformationEvent");
@@ -80,53 +77,6 @@ public static class Nilogger
 
     #endregion Cached EventIds (single source of truth)
 
-    #region Predefined Delegates for Performance
-
-    // For the no-argument path we lean on LoggerMessage.Define, which hands back a
-    // delegate that has already done the template parsing up front. One delegate per
-    // level is built once at startup and then reused for the lifetime of the process.
-    private static readonly Action<ILogger, string, Exception> _trace =
-        LoggerMessage.Define<string>(LogLevel.Trace, _traceId, _message);
-
-    private static readonly Action<ILogger, string, Exception> _debug =
-        LoggerMessage.Define<string>(LogLevel.Debug, _debugId, _message);
-
-    private static readonly Action<ILogger, string, Exception> _info =
-        LoggerMessage.Define<string>(LogLevel.Information, _infoId, _message);
-
-    private static readonly Action<ILogger, string, Exception> _warn =
-        LoggerMessage.Define<string>(LogLevel.Warning, _warnId, _message);
-
-    private static readonly Action<ILogger, string, Exception> _error =
-        LoggerMessage.Define<string>(LogLevel.Error, _errorId, _message);
-
-    private static readonly Action<ILogger, string, Exception> _critical =
-        LoggerMessage.Define<string>(LogLevel.Critical, _criticalId, _message);
-
-    // Used for any level outside the known range so Resolve can stay branch-light.
-    private static readonly Action<ILogger, string, Exception> _noop = static (_, __, ___) => { };
-
-    // Indexed by (int)LogLevel for an O(1) lookup; the trailing _noop covers LogLevel.None.
-    private static readonly Action<ILogger, string, Exception>[] _byLevel =
-    [
-        _trace,
-        _debug,
-        _info,
-        _warn,
-        _error,
-        _critical,
-        _noop
-    ];
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    private static Action<ILogger, string, Exception> Resolve(LogLevel level)
-    {
-        int idx = (int)level;
-        return (uint)idx < (uint)_byLevel.Length ? _byLevel[idx] : _info;
-    }
-
-    #endregion Predefined Delegates for Performance
-
     #region Timestamp Cache (Allocation-Free UTC)
 
     // Formatting DateTime.UtcNow on every exception would allocate a string each time.
@@ -137,16 +87,24 @@ public static class Nilogger
     private static readonly Timer _utcCacheTimer = new(UpdateUtc, null, 0, 1);
     private static volatile string _cachedUtc = FormatUtc();
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private static void UpdateUtc(object? _)
     {
-        _ = Interlocked.Exchange(ref _cachedUtc, FormatUtc());
+        try
+        {
+            Interlocked.Exchange(ref _cachedUtc, FormatUtc());
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
+        {
+            // A missed timestamp refresh is not fatal; swallowing here prevents the
+            // thread-pool unhandled-exception crash path (.NET 6+).
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     private static string FormatUtc()
     {
-        char[] buf = _utcBuffer?.Value ?? new char[33];
+        char[] buf = _utcBuffer.Value ?? new char[33];
         _ = DateTime.UtcNow.TryFormat(buf, out int len, "O", CultureInfo.InvariantCulture);
         return new string(buf, 0, len);
     }
@@ -165,14 +123,16 @@ public static class Nilogger
     {
         try
         {
-            _ = Interlocked.Exchange(ref _cachedUtc, FormatUtc());
             _ = _utcCacheTimer.Change(Timeout.Infinite, Timeout.Infinite);
             _utcCacheTimer.Dispose();
         }
         catch (ObjectDisposedException)
         {
-            // Already disposed by an earlier shutdown hook - nothing left to do.
+            // Already disposed by an earlier shutdown hook.
         }
+        // Final refresh is always done, even on a second idempotent call, so the
+        // cached timestamp is current regardless of who disposed the timer first.
+        Interlocked.Exchange(ref _cachedUtc, FormatUtc());
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -235,10 +195,76 @@ public static class Nilogger
     // templates that are only known at runtime rather than fixed at compile time.
     private static readonly ConcurrentDictionary<string, TemplateFormatter> _templateCache = new(StringComparer.Ordinal);
 
+    // Warn once (via Debug.WriteLine) when the cache looks unexpectedly large, which
+    // almost always means the caller is interpolating dynamic values into the template
+    // string instead of passing them as arguments. The threshold is generous; a healthy
+    // app typically has tens of distinct templates, not thousands.
+    private static int _templateCacheWarned;
+    private static volatile int _maxTemplateCacheEntries = 10_000;
+
+    /// <summary>
+    /// Gets or sets the maximum number of parsed templates to keep in the template cache.
+    /// </summary>
+    /// <value>A positive integer; defaults to 10,000. Values ≤ 0 are ignored.</value>
+    /// <remarks>
+    /// Once the cache reaches this limit, new templates are still parsed correctly on each
+    /// call but the result is not stored, preventing unbounded memory growth from callers
+    /// that use interpolated strings as message templates (e.g. <c>WriteInformation($"User {id}")</c>).
+    /// A diagnostic trace is emitted once when the threshold is first hit.
+    /// </remarks>
+    public static int MaxTemplateCacheEntries
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _maxTemplateCacheEntries;
+        set
+        {
+            if (value > 0)
+                _maxTemplateCacheEntries = value;
+        }
+    }
+
+    // Hot path: a single dictionary probe, inlined at every call site. Falls through to
+    // AddFormatter only on a cache miss, keeping the common case branch-light.
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     private static TemplateFormatter GetFormatter(string template)
     {
-        return _templateCache.GetOrAdd(template, static t => new TemplateFormatter(t));
+        return _templateCache.TryGetValue(template, out TemplateFormatter? hit) ? hit : AddFormatter(template);
+    }
+
+    // Slow path: add the template to the cache. When the cache has reached its configured
+    // limit, parse on the fly without caching to protect against unbounded memory growth.
+    // NoInlining keeps this off the inlined hot path.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static TemplateFormatter AddFormatter(string template)
+    {
+        int limit = _maxTemplateCacheEntries;
+        if (_templateCache.Count >= limit)
+        {
+            if (Interlocked.CompareExchange(ref _templateCacheWarned, 1, 0) == 0)
+            {
+                Debug.WriteLine(
+                    $"[Nilogger] Template cache has reached {limit} entries. " +
+                    "New templates will be parsed on each call but not cached to protect memory. " +
+                    "This typically means interpolated strings are being used as message templates " +
+                    "instead of placeholder arguments — for example, use " +
+                    "WriteInformation(\"User {Id} signed in\", userId) " +
+                    "rather than WriteInformation($\"User {userId} signed in\").");
+            }
+            return new TemplateFormatter(template);
+        }
+
+        TemplateFormatter formatter = _templateCache.GetOrAdd(template, static t => new TemplateFormatter(t));
+        if (_templateCache.Count > limit &&
+            Interlocked.CompareExchange(ref _templateCacheWarned, 1, 0) == 0)
+        {
+            Debug.WriteLine(
+                $"[Nilogger] Template cache has exceeded {limit} entries. " +
+                "This typically means interpolated strings are being used as message templates " +
+                "instead of placeholder arguments — for example, use " +
+                "WriteInformation(\"User {Id} signed in\", userId) " +
+                "rather than WriteInformation($\"User {userId} signed in\").");
+        }
+        return formatter;
     }
 
     // Parses a message template once and remembers two things: the property names (so
@@ -329,24 +355,38 @@ public static class Nilogger
         // Logging must never throw. If the template and the supplied arguments don't
         // line up, we hand back the raw template rather than let a FormatException
         // bubble out of a log call.
+        //
+        // Note: we always call string.Format even when Names is empty. The reason is that
+        // _format preserves "{{" and "}}" verbatim; string.Format is what converts them to
+        // literal "{" and "}". Skipping it when Names.Length == 0 would leave those escape
+        // sequences unprocessed in the rendered message — e.g. "{{val}}" instead of "{val}".
+        // When _format has no positional slots ({0}, {1}, …), string.Format returns it
+        // unchanged, so the extra call costs nothing in that case.
         public string Format(object a0)
         {
             try
-            { return Names.Length == 0 ? _format : string.Format(CultureInfo.InvariantCulture, _format, a0); }
+            { return string.Format(CultureInfo.InvariantCulture, _format, a0); }
             catch (FormatException) { return Template; }
         }
 
         public string Format(object a0, object a1)
         {
             try
-            { return Names.Length == 0 ? _format : string.Format(CultureInfo.InvariantCulture, _format, a0, a1); }
+            { return string.Format(CultureInfo.InvariantCulture, _format, a0, a1); }
             catch (FormatException) { return Template; }
         }
 
         public string Format(object a0, object a1, object a2)
         {
             try
-            { return Names.Length == 0 ? _format : string.Format(CultureInfo.InvariantCulture, _format, a0, a1, a2); }
+            { return string.Format(CultureInfo.InvariantCulture, _format, a0, a1, a2); }
+            catch (FormatException) { return Template; }
+        }
+
+        public string Format(object a0, object a1, object a2, object a3)
+        {
+            try
+            { return string.Format(CultureInfo.InvariantCulture, _format, a0, a1, a2, a3); }
             catch (FormatException) { return Template; }
         }
     }
@@ -375,20 +415,43 @@ public static class Nilogger
             _ => throw new ArgumentOutOfRangeException(nameof(index))
         };
 
-        public IEnumerator<KeyValuePair<string, object>> GetEnumerator()
-        {
-            yield return this[0];
-            yield return this[1];
-        }
+        // Struct enumerator: foreach on LogState<T0> is allocation-free (duck-typed
+        // pattern). The explicit interface implementations box for IEnumerable<T>
+        // callers, but the common structured-sink path avoids that allocation.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Enumerator GetEnumerator() => new(this);
 
-        IEnumerator IEnumerable.GetEnumerator()
-        {
-            return GetEnumerator();
-        }
+        IEnumerator<KeyValuePair<string, object>> IEnumerable<KeyValuePair<string, object>>.GetEnumerator()
+            => GetEnumerator();
 
-        public override string ToString()
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+        public override string ToString() => _fmt.Format(_v0!);
+
+        public struct Enumerator : IEnumerator<KeyValuePair<string, object>>
         {
-            return _fmt.Format(_v0!);
+            private readonly LogState<T0> _state;
+            private int _index;
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            internal Enumerator(LogState<T0> state)
+            {
+                _state = state;
+                _index = -1;
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public bool MoveNext()
+            {
+                _index++;
+                return _index < _state.Count;
+            }
+
+            public readonly KeyValuePair<string, object> Current => _state[_index];
+            readonly object IEnumerator.Current => _state[_index];
+
+            public void Reset() { _index = -1; }
+            public readonly void Dispose() { }
         }
     }
 
@@ -414,21 +477,40 @@ public static class Nilogger
             _ => throw new ArgumentOutOfRangeException(nameof(index))
         };
 
-        public IEnumerator<KeyValuePair<string, object>> GetEnumerator()
-        {
-            yield return this[0];
-            yield return this[1];
-            yield return this[2];
-        }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Enumerator GetEnumerator() => new(this);
 
-        IEnumerator IEnumerable.GetEnumerator()
-        {
-            return GetEnumerator();
-        }
+        IEnumerator<KeyValuePair<string, object>> IEnumerable<KeyValuePair<string, object>>.GetEnumerator()
+            => GetEnumerator();
 
-        public override string ToString()
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+        public override string ToString() => _fmt.Format(_v0!, _v1!);
+
+        public struct Enumerator : IEnumerator<KeyValuePair<string, object>>
         {
-            return _fmt.Format(_v0!, _v1!);
+            private readonly LogState<T0, T1> _state;
+            private int _index;
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            internal Enumerator(LogState<T0, T1> state)
+            {
+                _state = state;
+                _index = -1;
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public bool MoveNext()
+            {
+                _index++;
+                return _index < _state.Count;
+            }
+
+            public readonly KeyValuePair<string, object> Current => _state[_index];
+            readonly object IEnumerator.Current => _state[_index];
+
+            public void Reset() { _index = -1; }
+            public readonly void Dispose() { }
         }
     }
 
@@ -456,22 +538,103 @@ public static class Nilogger
             _ => throw new ArgumentOutOfRangeException(nameof(index))
         };
 
-        public IEnumerator<KeyValuePair<string, object>> GetEnumerator()
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Enumerator GetEnumerator() => new(this);
+
+        IEnumerator<KeyValuePair<string, object>> IEnumerable<KeyValuePair<string, object>>.GetEnumerator()
+            => GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+        public override string ToString() => _fmt.Format(_v0!, _v1!, _v2!);
+
+        public struct Enumerator : IEnumerator<KeyValuePair<string, object>>
         {
-            yield return this[0];
-            yield return this[1];
-            yield return this[2];
-            yield return this[3];
+            private readonly LogState<T0, T1, T2> _state;
+            private int _index;
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            internal Enumerator(LogState<T0, T1, T2> state)
+            {
+                _state = state;
+                _index = -1;
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public bool MoveNext()
+            {
+                _index++;
+                return _index < _state.Count;
+            }
+
+            public readonly KeyValuePair<string, object> Current => _state[_index];
+            readonly object IEnumerator.Current => _state[_index];
+
+            public void Reset() { _index = -1; }
+            public readonly void Dispose() { }
+        }
+    }
+
+    private readonly struct LogState<T0, T1, T2, T3> : IReadOnlyList<KeyValuePair<string, object>>
+    {
+        private readonly TemplateFormatter _fmt;
+        private readonly T0 _v0;
+        private readonly T1 _v1;
+        private readonly T2 _v2;
+        private readonly T3 _v3;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public LogState(TemplateFormatter fmt, T0 v0, T1 v1, T2 v2, T3 v3)
+        {
+            (_fmt, _v0, _v1, _v2, _v3) = (fmt, v0, v1, v2, v3);
         }
 
-        IEnumerator IEnumerable.GetEnumerator()
-        {
-            return GetEnumerator();
-        }
+        public int Count => 5;
 
-        public override string ToString()
+        public KeyValuePair<string, object> this[int index] => index switch
         {
-            return _fmt.Format(_v0!, _v1!, _v2!);
+            0 => new(_fmt.GetName(0), _v0!),
+            1 => new(_fmt.GetName(1), _v1!),
+            2 => new(_fmt.GetName(2), _v2!),
+            3 => new(_fmt.GetName(3), _v3!),
+            4 => new("{OriginalFormat}", _fmt.Template),
+            _ => throw new ArgumentOutOfRangeException(nameof(index))
+        };
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Enumerator GetEnumerator() => new(this);
+
+        IEnumerator<KeyValuePair<string, object>> IEnumerable<KeyValuePair<string, object>>.GetEnumerator()
+            => GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+        public override string ToString() => _fmt.Format(_v0!, _v1!, _v2!, _v3!);
+
+        public struct Enumerator : IEnumerator<KeyValuePair<string, object>>
+        {
+            private readonly LogState<T0, T1, T2, T3> _state;
+            private int _index;
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            internal Enumerator(LogState<T0, T1, T2, T3> state)
+            {
+                _state = state;
+                _index = -1;
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public bool MoveNext()
+            {
+                _index++;
+                return _index < _state.Count;
+            }
+
+            public readonly KeyValuePair<string, object> Current => _state[_index];
+            readonly object IEnumerator.Current => _state[_index];
+
+            public void Reset() { _index = -1; }
+            public readonly void Dispose() { }
         }
     }
 
@@ -496,20 +659,20 @@ public static class Nilogger
             return;
         }
 
-        Resolve(level)(logger, message ?? "N/A", null!);
+        logger.Log(level, GetEventId(level), message ?? "N/A", null, static (s, _) => s);
     }
 
     /// <summary>
     /// Logs a templated message with one argument and no array allocation.
     /// </summary>
-    /// <typeparam name="T1">The type of the template argument.</typeparam>
+    /// <typeparam name="T0">The type of the template argument.</typeparam>
     /// <param name="logger">The logger to write to.</param>
     /// <param name="level">The severity to log at.</param>
     /// <param name="message">A message template such as <c>"User {Id} signed in"</c>.</param>
-    /// <param name="arg1">The value for the first placeholder.</param>
+    /// <param name="arg0">The value for the first placeholder.</param>
     /// <exception cref="ArgumentNullException"><paramref name="logger"/> is <see langword="null"/>.</exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public static void Log<T1>(ILogger logger, LogLevel level, string message, T1 arg1)
+    public static void Log<T0>(ILogger logger, LogLevel level, string message, T0 arg0)
     {
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -518,22 +681,22 @@ public static class Nilogger
             return;
         }
 
-        Emit(logger, level, null!, message, arg1);
+        Emit(logger, level, null!, message, arg0);
     }
 
     /// <summary>
     /// Logs a templated message with two arguments and no array allocation.
     /// </summary>
-    /// <typeparam name="T1">The type of the first template argument.</typeparam>
-    /// <typeparam name="T2">The type of the second template argument.</typeparam>
+    /// <typeparam name="T0">The type of the first template argument.</typeparam>
+    /// <typeparam name="T1">The type of the second template argument.</typeparam>
     /// <param name="logger">The logger to write to.</param>
     /// <param name="level">The severity to log at.</param>
     /// <param name="message">A message template such as <c>"Order {Id} totalled {Amount}"</c>.</param>
-    /// <param name="arg1">The value for the first placeholder.</param>
-    /// <param name="arg2">The value for the second placeholder.</param>
+    /// <param name="arg0">The value for the first placeholder.</param>
+    /// <param name="arg1">The value for the second placeholder.</param>
     /// <exception cref="ArgumentNullException"><paramref name="logger"/> is <see langword="null"/>.</exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public static void Log<T1, T2>(ILogger logger, LogLevel level, string message, T1 arg1, T2 arg2)
+    public static void Log<T0, T1>(ILogger logger, LogLevel level, string message, T0 arg0, T1 arg1)
     {
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -542,24 +705,24 @@ public static class Nilogger
             return;
         }
 
-        Emit(logger, level, null!, message, arg1, arg2);
+        Emit(logger, level, null!, message, arg0, arg1);
     }
 
     /// <summary>
     /// Logs a templated message with three arguments and no array allocation.
     /// </summary>
-    /// <typeparam name="T1">The type of the first template argument.</typeparam>
-    /// <typeparam name="T2">The type of the second template argument.</typeparam>
-    /// <typeparam name="T3">The type of the third template argument.</typeparam>
+    /// <typeparam name="T0">The type of the first template argument.</typeparam>
+    /// <typeparam name="T1">The type of the second template argument.</typeparam>
+    /// <typeparam name="T2">The type of the third template argument.</typeparam>
     /// <param name="logger">The logger to write to.</param>
     /// <param name="level">The severity to log at.</param>
     /// <param name="message">A message template with three placeholders.</param>
-    /// <param name="arg1">The value for the first placeholder.</param>
-    /// <param name="arg2">The value for the second placeholder.</param>
-    /// <param name="arg3">The value for the third placeholder.</param>
+    /// <param name="arg0">The value for the first placeholder.</param>
+    /// <param name="arg1">The value for the second placeholder.</param>
+    /// <param name="arg2">The value for the third placeholder.</param>
     /// <exception cref="ArgumentNullException"><paramref name="logger"/> is <see langword="null"/>.</exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public static void Log<T1, T2, T3>(ILogger logger, LogLevel level, string message, T1 arg1, T2 arg2, T3 arg3)
+    public static void Log<T0, T1, T2>(ILogger logger, LogLevel level, string message, T0 arg0, T1 arg1, T2 arg2)
     {
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -568,7 +731,35 @@ public static class Nilogger
             return;
         }
 
-        Emit(logger, level, null!, message, arg1, arg2, arg3);
+        Emit(logger, level, null!, message, arg0, arg1, arg2);
+    }
+
+    /// <summary>
+    /// Logs a templated message with four arguments and no array allocation.
+    /// </summary>
+    /// <typeparam name="T0">The type of the first template argument.</typeparam>
+    /// <typeparam name="T1">The type of the second template argument.</typeparam>
+    /// <typeparam name="T2">The type of the third template argument.</typeparam>
+    /// <typeparam name="T3">The type of the fourth template argument.</typeparam>
+    /// <param name="logger">The logger to write to.</param>
+    /// <param name="level">The severity to log at.</param>
+    /// <param name="message">A message template with four placeholders.</param>
+    /// <param name="arg0">The value for the first placeholder.</param>
+    /// <param name="arg1">The value for the second placeholder.</param>
+    /// <param name="arg2">The value for the third placeholder.</param>
+    /// <param name="arg3">The value for the fourth placeholder.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="logger"/> is <see langword="null"/>.</exception>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    public static void Log<T0, T1, T2, T3>(ILogger logger, LogLevel level, string message, T0 arg0, T1 arg1, T2 arg2, T3 arg3)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+
+        if (!logger.IsEnabled(level))
+        {
+            return;
+        }
+
+        Emit(logger, level, null!, message, arg0, arg1, arg2, arg3);
     }
 
     // The typed emit helpers wrap the arguments in a stack-allocated LogState struct and
@@ -598,6 +789,13 @@ public static class Nilogger
         logger.Log(level, GetEventId(level), new LogState<T0, T1, T2>(fmt, v0, v1, v2), exception, static (s, _) => s.ToString());
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    private static void Emit<T0, T1, T2, T3>(ILogger logger, LogLevel level, Exception exception, string message, T0 v0, T1 v1, T2 v2, T3 v3)
+    {
+        TemplateFormatter fmt = GetFormatter(message ?? "N/A");
+        logger.Log(level, GetEventId(level), new LogState<T0, T1, T2, T3>(fmt, v0, v1, v2, v3), exception, static (s, _) => s.ToString());
+    }
+
     /// <summary>
     /// Logs a message with an associated exception and an arbitrary number of arguments.
     /// </summary>
@@ -624,7 +822,7 @@ public static class Nilogger
         message ??= "N/A";
         if (args is null || args.Length == 0)
         {
-            Resolve(level)(logger, message, exception);
+            logger.Log(level, GetEventId(level), message, exception, static (s, _) => s);
             return;
         }
 
@@ -684,7 +882,7 @@ public static class Nilogger
             return;
         }
 
-        Resolve(level)(logger, message ?? "N/A", null!);
+        logger.Log(level, GetEventId(level), message ?? "N/A", null, static (s, _) => s);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
@@ -695,7 +893,7 @@ public static class Nilogger
             return;
         }
 
-        Resolve(level)(logger, message ?? "N/A", exception);
+        logger.Log(level, GetEventId(level), message ?? "N/A", exception, static (s, _) => s);
     }
 
     #endregion Generic Log Methods
@@ -795,6 +993,27 @@ public static class Nilogger
     }
 
     /// <summary>
+    /// Logs an <see cref="LogLevel.Error"/> message with an associated exception and no template arguments.
+    /// </summary>
+    /// <param name="logger">The logger to write to.</param>
+    /// <param name="message">The message text. Must not be <see langword="null"/>.</param>
+    /// <param name="exception">The exception to attach. Must not be <see langword="null"/>.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="logger"/>, <paramref name="message"/>, or <paramref name="exception"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// Prefer this overload over the <c>params</c> variant when there are no template arguments:
+    /// it avoids the empty array the compiler otherwise synthesises and wins overload resolution
+    /// cleanly over the <c>params</c> form, so the call site is unambiguous.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    public static void WriteError(this ILogger logger, string message, Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(message);
+        ArgumentNullException.ThrowIfNull(exception);
+        LogNoArgs(logger, LogLevel.Error, message, exception);
+    }
+
+    /// <summary>
     /// Logs an <see cref="LogLevel.Error"/> message without an exception.
     /// </summary>
     /// <param name="logger">The logger to write to.</param>
@@ -802,6 +1021,7 @@ public static class Nilogger
     /// <param name="args">Optional template arguments.</param>
     /// <exception cref="ArgumentNullException"><paramref name="logger"/> or <paramref name="message"/> is <see langword="null"/>.</exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    [OverloadResolutionPriority(-2)]
     public static void WriteError(this ILogger logger, string message, params object[] args)
     {
         ArgumentNullException.ThrowIfNull(logger);
@@ -833,6 +1053,27 @@ public static class Nilogger
     }
 
     /// <summary>
+    /// Logs a <see cref="LogLevel.Critical"/> message with an associated exception and no template arguments.
+    /// </summary>
+    /// <param name="logger">The logger to write to.</param>
+    /// <param name="message">The message text. Must not be <see langword="null"/>.</param>
+    /// <param name="exception">The exception to attach. Must not be <see langword="null"/>.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="logger"/>, <paramref name="message"/>, or <paramref name="exception"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// Prefer this overload over the <c>params</c> variant when there are no template arguments:
+    /// it avoids the empty array the compiler otherwise synthesises and wins overload resolution
+    /// cleanly over the <c>params</c> form, so the call site is unambiguous.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    public static void WriteCritical(this ILogger logger, string message, Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(message);
+        ArgumentNullException.ThrowIfNull(exception);
+        LogNoArgs(logger, LogLevel.Critical, message, exception);
+    }
+
+    /// <summary>
     /// Logs a <see cref="LogLevel.Critical"/> message without an exception.
     /// </summary>
     /// <param name="logger">The logger to write to.</param>
@@ -840,6 +1081,7 @@ public static class Nilogger
     /// <param name="args">Optional template arguments.</param>
     /// <exception cref="ArgumentNullException"><paramref name="logger"/> or <paramref name="message"/> is <see langword="null"/>.</exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    [OverloadResolutionPriority(-2)]
     public static void WriteCritical(this ILogger logger, string message, params object[] args)
     {
         ArgumentNullException.ThrowIfNull(logger);
@@ -921,6 +1163,30 @@ public static class Nilogger
     }
 
     /// <summary>
+    /// Logs a <see cref="LogLevel.Trace"/> message with four strongly-typed arguments.
+    /// </summary>
+    /// <typeparam name="T0">The type of the first argument.</typeparam>
+    /// <typeparam name="T1">The type of the second argument.</typeparam>
+    /// <typeparam name="T2">The type of the third argument.</typeparam>
+    /// <typeparam name="T3">The type of the fourth argument.</typeparam>
+    /// <param name="logger">The logger to write to.</param>
+    /// <param name="message">A four-placeholder message template. Must not be <see langword="null"/>.</param>
+    /// <param name="arg0">The value for the first placeholder.</param>
+    /// <param name="arg1">The value for the second placeholder.</param>
+    /// <param name="arg2">The value for the third placeholder.</param>
+    /// <param name="arg3">The value for the fourth placeholder.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="logger"/> or <paramref name="message"/> is <see langword="null"/>.</exception>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    public static void WriteTrace<T0, T1, T2, T3>(this ILogger logger, string message, T0 arg0, T1 arg1, T2 arg2, T3 arg3)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(message);
+        if (!logger.IsEnabled(LogLevel.Trace))
+        { return; }
+        Emit(logger, LogLevel.Trace, null!, message, arg0, arg1, arg2, arg3);
+    }
+
+    /// <summary>
     /// Logs a <see cref="LogLevel.Debug"/> message with one strongly-typed argument.
     /// </summary>
     /// <typeparam name="T0">The type of the argument.</typeparam>
@@ -978,6 +1244,30 @@ public static class Nilogger
         if (!logger.IsEnabled(LogLevel.Debug))
         { return; }
         Emit(logger, LogLevel.Debug, null!, message, arg0, arg1, arg2);
+    }
+
+    /// <summary>
+    /// Logs a <see cref="LogLevel.Debug"/> message with four strongly-typed arguments.
+    /// </summary>
+    /// <typeparam name="T0">The type of the first argument.</typeparam>
+    /// <typeparam name="T1">The type of the second argument.</typeparam>
+    /// <typeparam name="T2">The type of the third argument.</typeparam>
+    /// <typeparam name="T3">The type of the fourth argument.</typeparam>
+    /// <param name="logger">The logger to write to.</param>
+    /// <param name="message">A four-placeholder message template. Must not be <see langword="null"/>.</param>
+    /// <param name="arg0">The value for the first placeholder.</param>
+    /// <param name="arg1">The value for the second placeholder.</param>
+    /// <param name="arg2">The value for the third placeholder.</param>
+    /// <param name="arg3">The value for the fourth placeholder.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="logger"/> or <paramref name="message"/> is <see langword="null"/>.</exception>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    public static void WriteDebug<T0, T1, T2, T3>(this ILogger logger, string message, T0 arg0, T1 arg1, T2 arg2, T3 arg3)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(message);
+        if (!logger.IsEnabled(LogLevel.Debug))
+        { return; }
+        Emit(logger, LogLevel.Debug, null!, message, arg0, arg1, arg2, arg3);
     }
 
     /// <summary>
@@ -1041,6 +1331,30 @@ public static class Nilogger
     }
 
     /// <summary>
+    /// Logs an <see cref="LogLevel.Information"/> message with four strongly-typed arguments.
+    /// </summary>
+    /// <typeparam name="T0">The type of the first argument.</typeparam>
+    /// <typeparam name="T1">The type of the second argument.</typeparam>
+    /// <typeparam name="T2">The type of the third argument.</typeparam>
+    /// <typeparam name="T3">The type of the fourth argument.</typeparam>
+    /// <param name="logger">The logger to write to.</param>
+    /// <param name="message">A four-placeholder message template. Must not be <see langword="null"/>.</param>
+    /// <param name="arg0">The value for the first placeholder.</param>
+    /// <param name="arg1">The value for the second placeholder.</param>
+    /// <param name="arg2">The value for the third placeholder.</param>
+    /// <param name="arg3">The value for the fourth placeholder.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="logger"/> or <paramref name="message"/> is <see langword="null"/>.</exception>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    public static void WriteInformation<T0, T1, T2, T3>(this ILogger logger, string message, T0 arg0, T1 arg1, T2 arg2, T3 arg3)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(message);
+        if (!logger.IsEnabled(LogLevel.Information))
+        { return; }
+        Emit(logger, LogLevel.Information, null!, message, arg0, arg1, arg2, arg3);
+    }
+
+    /// <summary>
     /// Logs a <see cref="LogLevel.Warning"/> message with one strongly-typed argument.
     /// </summary>
     /// <typeparam name="T0">The type of the argument.</typeparam>
@@ -1098,6 +1412,30 @@ public static class Nilogger
         if (!logger.IsEnabled(LogLevel.Warning))
         { return; }
         Emit(logger, LogLevel.Warning, null!, message, arg0, arg1, arg2);
+    }
+
+    /// <summary>
+    /// Logs a <see cref="LogLevel.Warning"/> message with four strongly-typed arguments.
+    /// </summary>
+    /// <typeparam name="T0">The type of the first argument.</typeparam>
+    /// <typeparam name="T1">The type of the second argument.</typeparam>
+    /// <typeparam name="T2">The type of the third argument.</typeparam>
+    /// <typeparam name="T3">The type of the fourth argument.</typeparam>
+    /// <param name="logger">The logger to write to.</param>
+    /// <param name="message">A four-placeholder message template. Must not be <see langword="null"/>.</param>
+    /// <param name="arg0">The value for the first placeholder.</param>
+    /// <param name="arg1">The value for the second placeholder.</param>
+    /// <param name="arg2">The value for the third placeholder.</param>
+    /// <param name="arg3">The value for the fourth placeholder.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="logger"/> or <paramref name="message"/> is <see langword="null"/>.</exception>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    public static void WriteWarning<T0, T1, T2, T3>(this ILogger logger, string message, T0 arg0, T1 arg1, T2 arg2, T3 arg3)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(message);
+        if (!logger.IsEnabled(LogLevel.Warning))
+        { return; }
+        Emit(logger, LogLevel.Warning, null!, message, arg0, arg1, arg2, arg3);
     }
 
     /// <summary>
@@ -1167,6 +1505,32 @@ public static class Nilogger
     }
 
     /// <summary>
+    /// Logs an <see cref="LogLevel.Error"/> message with an exception and four strongly-typed arguments.
+    /// </summary>
+    /// <typeparam name="T0">The type of the first argument.</typeparam>
+    /// <typeparam name="T1">The type of the second argument.</typeparam>
+    /// <typeparam name="T2">The type of the third argument.</typeparam>
+    /// <typeparam name="T3">The type of the fourth argument.</typeparam>
+    /// <param name="logger">The logger to write to.</param>
+    /// <param name="message">A four-placeholder message template. Must not be <see langword="null"/>.</param>
+    /// <param name="exception">The exception to attach. Must not be <see langword="null"/>.</param>
+    /// <param name="arg0">The value for the first placeholder.</param>
+    /// <param name="arg1">The value for the second placeholder.</param>
+    /// <param name="arg2">The value for the third placeholder.</param>
+    /// <param name="arg3">The value for the fourth placeholder.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="logger"/>, <paramref name="message"/>, or <paramref name="exception"/> is <see langword="null"/>.</exception>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    public static void WriteError<T0, T1, T2, T3>(this ILogger logger, string message, Exception exception, T0 arg0, T1 arg1, T2 arg2, T3 arg3)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(message);
+        ArgumentNullException.ThrowIfNull(exception);
+        if (!logger.IsEnabled(LogLevel.Error))
+        { return; }
+        Emit(logger, LogLevel.Error, exception, message, arg0, arg1, arg2, arg3);
+    }
+
+    /// <summary>
     /// Logs a <see cref="LogLevel.Critical"/> message with an exception and one strongly-typed argument.
     /// </summary>
     /// <typeparam name="T0">The type of the argument.</typeparam>
@@ -1232,6 +1596,218 @@ public static class Nilogger
         Emit(logger, LogLevel.Critical, exception, message, arg0, arg1, arg2);
     }
 
+    /// <summary>
+    /// Logs a <see cref="LogLevel.Critical"/> message with an exception and four strongly-typed arguments.
+    /// </summary>
+    /// <typeparam name="T0">The type of the first argument.</typeparam>
+    /// <typeparam name="T1">The type of the second argument.</typeparam>
+    /// <typeparam name="T2">The type of the third argument.</typeparam>
+    /// <typeparam name="T3">The type of the fourth argument.</typeparam>
+    /// <param name="logger">The logger to write to.</param>
+    /// <param name="message">A four-placeholder message template. Must not be <see langword="null"/>.</param>
+    /// <param name="exception">The exception to attach. Must not be <see langword="null"/>.</param>
+    /// <param name="arg0">The value for the first placeholder.</param>
+    /// <param name="arg1">The value for the second placeholder.</param>
+    /// <param name="arg2">The value for the third placeholder.</param>
+    /// <param name="arg3">The value for the fourth placeholder.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="logger"/>, <paramref name="message"/>, or <paramref name="exception"/> is <see langword="null"/>.</exception>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    public static void WriteCritical<T0, T1, T2, T3>(this ILogger logger, string message, Exception exception, T0 arg0, T1 arg1, T2 arg2, T3 arg3)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(message);
+        ArgumentNullException.ThrowIfNull(exception);
+        if (!logger.IsEnabled(LogLevel.Critical))
+        { return; }
+        Emit(logger, LogLevel.Critical, exception, message, arg0, arg1, arg2, arg3);
+    }
+
+    // -------------------------------------------------------------------------
+    // WriteError / WriteCritical — typed, no exception
+    //
+    // [OverloadResolutionPriority(-1)] keeps these below the existing
+    // WriteError(message, Exception) / WriteError(message, Exception, T0, ...)
+    // overloads (priority 0), so passing an Exception as the second argument
+    // still routes to the with-exception path.  The params fallbacks above are
+    // at priority -2, so these typed variants beat them for 1–3 value args.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Logs an <see cref="LogLevel.Error"/> message with one strongly-typed argument and no exception.
+    /// </summary>
+    /// <typeparam name="T0">The type of the argument.</typeparam>
+    /// <param name="logger">The logger to write to.</param>
+    /// <param name="message">A single-placeholder message template. Must not be <see langword="null"/>.</param>
+    /// <param name="arg0">The value for the placeholder.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="logger"/> or <paramref name="message"/> is <see langword="null"/>.</exception>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    [OverloadResolutionPriority(-1)]
+    public static void WriteError<T0>(this ILogger logger, string message, T0 arg0)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(message);
+        if (!logger.IsEnabled(LogLevel.Error))
+        { return; }
+        Emit(logger, LogLevel.Error, null!, message, arg0);
+    }
+
+    /// <summary>
+    /// Logs an <see cref="LogLevel.Error"/> message with two strongly-typed arguments and no exception.
+    /// </summary>
+    /// <typeparam name="T0">The type of the first argument.</typeparam>
+    /// <typeparam name="T1">The type of the second argument.</typeparam>
+    /// <param name="logger">The logger to write to.</param>
+    /// <param name="message">A two-placeholder message template. Must not be <see langword="null"/>.</param>
+    /// <param name="arg0">The value for the first placeholder.</param>
+    /// <param name="arg1">The value for the second placeholder.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="logger"/> or <paramref name="message"/> is <see langword="null"/>.</exception>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    [OverloadResolutionPriority(-1)]
+    public static void WriteError<T0, T1>(this ILogger logger, string message, T0 arg0, T1 arg1)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(message);
+        if (!logger.IsEnabled(LogLevel.Error))
+        { return; }
+        Emit(logger, LogLevel.Error, null!, message, arg0, arg1);
+    }
+
+    /// <summary>
+    /// Logs an <see cref="LogLevel.Error"/> message with three strongly-typed arguments and no exception.
+    /// </summary>
+    /// <typeparam name="T0">The type of the first argument.</typeparam>
+    /// <typeparam name="T1">The type of the second argument.</typeparam>
+    /// <typeparam name="T2">The type of the third argument.</typeparam>
+    /// <param name="logger">The logger to write to.</param>
+    /// <param name="message">A three-placeholder message template. Must not be <see langword="null"/>.</param>
+    /// <param name="arg0">The value for the first placeholder.</param>
+    /// <param name="arg1">The value for the second placeholder.</param>
+    /// <param name="arg2">The value for the third placeholder.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="logger"/> or <paramref name="message"/> is <see langword="null"/>.</exception>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    [OverloadResolutionPriority(-1)]
+    public static void WriteError<T0, T1, T2>(this ILogger logger, string message, T0 arg0, T1 arg1, T2 arg2)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(message);
+        if (!logger.IsEnabled(LogLevel.Error))
+        { return; }
+        Emit(logger, LogLevel.Error, null!, message, arg0, arg1, arg2);
+    }
+
+    /// <summary>
+    /// Logs an <see cref="LogLevel.Error"/> message with four strongly-typed arguments and no exception.
+    /// </summary>
+    /// <typeparam name="T0">The type of the first argument.</typeparam>
+    /// <typeparam name="T1">The type of the second argument.</typeparam>
+    /// <typeparam name="T2">The type of the third argument.</typeparam>
+    /// <typeparam name="T3">The type of the fourth argument.</typeparam>
+    /// <param name="logger">The logger to write to.</param>
+    /// <param name="message">A four-placeholder message template. Must not be <see langword="null"/>.</param>
+    /// <param name="arg0">The value for the first placeholder.</param>
+    /// <param name="arg1">The value for the second placeholder.</param>
+    /// <param name="arg2">The value for the third placeholder.</param>
+    /// <param name="arg3">The value for the fourth placeholder.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="logger"/> or <paramref name="message"/> is <see langword="null"/>.</exception>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    [OverloadResolutionPriority(-1)]
+    public static void WriteError<T0, T1, T2, T3>(this ILogger logger, string message, T0 arg0, T1 arg1, T2 arg2, T3 arg3)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(message);
+        if (!logger.IsEnabled(LogLevel.Error))
+        { return; }
+        Emit(logger, LogLevel.Error, null!, message, arg0, arg1, arg2, arg3);
+    }
+
+    /// <summary>
+    /// Logs a <see cref="LogLevel.Critical"/> message with one strongly-typed argument and no exception.
+    /// </summary>
+    /// <typeparam name="T0">The type of the argument.</typeparam>
+    /// <param name="logger">The logger to write to.</param>
+    /// <param name="message">A single-placeholder message template. Must not be <see langword="null"/>.</param>
+    /// <param name="arg0">The value for the placeholder.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="logger"/> or <paramref name="message"/> is <see langword="null"/>.</exception>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    [OverloadResolutionPriority(-1)]
+    public static void WriteCritical<T0>(this ILogger logger, string message, T0 arg0)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(message);
+        if (!logger.IsEnabled(LogLevel.Critical))
+        { return; }
+        Emit(logger, LogLevel.Critical, null!, message, arg0);
+    }
+
+    /// <summary>
+    /// Logs a <see cref="LogLevel.Critical"/> message with two strongly-typed arguments and no exception.
+    /// </summary>
+    /// <typeparam name="T0">The type of the first argument.</typeparam>
+    /// <typeparam name="T1">The type of the second argument.</typeparam>
+    /// <param name="logger">The logger to write to.</param>
+    /// <param name="message">A two-placeholder message template. Must not be <see langword="null"/>.</param>
+    /// <param name="arg0">The value for the first placeholder.</param>
+    /// <param name="arg1">The value for the second placeholder.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="logger"/> or <paramref name="message"/> is <see langword="null"/>.</exception>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    [OverloadResolutionPriority(-1)]
+    public static void WriteCritical<T0, T1>(this ILogger logger, string message, T0 arg0, T1 arg1)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(message);
+        if (!logger.IsEnabled(LogLevel.Critical))
+        { return; }
+        Emit(logger, LogLevel.Critical, null!, message, arg0, arg1);
+    }
+
+    /// <summary>
+    /// Logs a <see cref="LogLevel.Critical"/> message with three strongly-typed arguments and no exception.
+    /// </summary>
+    /// <typeparam name="T0">The type of the first argument.</typeparam>
+    /// <typeparam name="T1">The type of the second argument.</typeparam>
+    /// <typeparam name="T2">The type of the third argument.</typeparam>
+    /// <param name="logger">The logger to write to.</param>
+    /// <param name="message">A three-placeholder message template. Must not be <see langword="null"/>.</param>
+    /// <param name="arg0">The value for the first placeholder.</param>
+    /// <param name="arg1">The value for the second placeholder.</param>
+    /// <param name="arg2">The value for the third placeholder.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="logger"/> or <paramref name="message"/> is <see langword="null"/>.</exception>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    [OverloadResolutionPriority(-1)]
+    public static void WriteCritical<T0, T1, T2>(this ILogger logger, string message, T0 arg0, T1 arg1, T2 arg2)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(message);
+        if (!logger.IsEnabled(LogLevel.Critical))
+        { return; }
+        Emit(logger, LogLevel.Critical, null!, message, arg0, arg1, arg2);
+    }
+
+    /// <summary>
+    /// Logs a <see cref="LogLevel.Critical"/> message with four strongly-typed arguments and no exception.
+    /// </summary>
+    /// <typeparam name="T0">The type of the first argument.</typeparam>
+    /// <typeparam name="T1">The type of the second argument.</typeparam>
+    /// <typeparam name="T2">The type of the third argument.</typeparam>
+    /// <typeparam name="T3">The type of the fourth argument.</typeparam>
+    /// <param name="logger">The logger to write to.</param>
+    /// <param name="message">A four-placeholder message template. Must not be <see langword="null"/>.</param>
+    /// <param name="arg0">The value for the first placeholder.</param>
+    /// <param name="arg1">The value for the second placeholder.</param>
+    /// <param name="arg2">The value for the third placeholder.</param>
+    /// <param name="arg3">The value for the fourth placeholder.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="logger"/> or <paramref name="message"/> is <see langword="null"/>.</exception>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    [OverloadResolutionPriority(-1)]
+    public static void WriteCritical<T0, T1, T2, T3>(this ILogger logger, string message, T0 arg0, T1 arg1, T2 arg2, T3 arg3)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(message);
+        if (!logger.IsEnabled(LogLevel.Critical))
+        { return; }
+        Emit(logger, LogLevel.Critical, null!, message, arg0, arg1, arg2, arg3);
+    }
+
     #endregion Typed Convenience Overloads (zero array allocation)
 
     #region Exception Logging
@@ -1256,7 +1832,7 @@ public static class Nilogger
         }
 
         string msg = _exceptionFormatter(ex, title, moreDetailsEnabled);
-        LogNoArgs(logger, LogLevel.Error, msg, null!);
+        LogNoArgs(logger, LogLevel.Error, msg, ex);
     }
 
     /// <summary>
@@ -1279,7 +1855,7 @@ public static class Nilogger
         }
 
         string msg = _exceptionFormatter(ex, title, moreDetailsEnabled);
-        LogNoArgs(logger, LogLevel.Critical, msg, null!);
+        LogNoArgs(logger, LogLevel.Critical, msg, ex);
     }
 
     // The default exception renderer. It produces a fixed, aligned block of fields and,
@@ -1294,9 +1870,10 @@ public static class Nilogger
             _ = sb.Clear();
             _ = sb.EnsureCapacity(1024);
 
+            Type exType = ex.GetType();
             _ = sb.Append("Timestamp      : ").AppendLine(_cachedUtc)
                 .Append("Title          : ").AppendLine(title ?? "N/A")
-                .Append("Exception Type : ").AppendLine(ex.GetType().FullName)
+                .Append("Exception Type : ").AppendLine(exType.FullName ?? exType.Name)
                 .Append("Message        : ").AppendLine(ex.Message?.Trim() ?? "N/A")
                 .Append("HResult        : ").Append(ex.HResult).AppendLine()
                 .Append("Source         : ").AppendLine(ex.Source ?? "N/A")
@@ -1325,6 +1902,15 @@ public static class Nilogger
         }
     }
 
+    // Pre-built indent strings so AppendInnerExceptionDetails never allocates a new
+    // string for each recursion level. Depths beyond the array length fall back to
+    // new string('>', depth), which is the slow path and not reached with maxDepth ≤ 5.
+    private static readonly string[] _indents = [">", ">>", ">>>", ">>>>", ">>>>>"];
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static string GetIndent(int depth) =>
+        (uint)(depth - 1) < (uint)_indents.Length ? _indents[depth - 1] : new string('>', depth);
+
     // Walks the inner-exception chain (and AggregateException branches) up to maxDepth,
     // indenting each level with '>' so the nesting is readable in plain-text sinks.
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -1335,8 +1921,9 @@ public static class Nilogger
             return;
         }
 
-        string indent = new('>', depth);
-        _ = sb.Append(indent).Append(" Exception Type : ").AppendLine(inner.GetType().FullName)
+        string indent = GetIndent(depth);
+        Type innerType = inner.GetType();
+        _ = sb.Append(indent).Append(" Exception Type : ").AppendLine(innerType.FullName ?? innerType.Name)
             .Append(indent).Append(" Message        : ").AppendLine(inner.Message?.Trim() ?? "N/A")
             .Append(indent).Append(" HResult        : ").Append(inner.HResult).AppendLine()
             .Append(indent).Append(" Source         : ").AppendLine(inner.Source ?? "N/A")
@@ -1404,7 +1991,7 @@ public static class Nilogger
     /// copied, so later mutation of the supplied dictionary does not affect the scope.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public static IDisposable WriteScope(this ILogger logger, IDictionary<string, object> context)
+    public static IDisposable WriteScope(this ILogger logger, IDictionary<string, object>? context)
     {
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -1435,6 +2022,89 @@ public static class Nilogger
 
             ScopeWrapper wrapper = new(safe);
             return logger.BeginScope(wrapper) ?? new DisposableScope(wrapper);
+        }
+    }
+
+    /// <summary>
+    /// Begins a logging scope from any key/value sequence, including
+    /// <see cref="IReadOnlyDictionary{TKey, TValue}"/> and immutable dictionary types that
+    /// do not implement <see cref="IDictionary{TKey, TValue}"/>.
+    /// </summary>
+    /// <param name="logger">The logger to open the scope on.</param>
+    /// <param name="context">The key/value pairs to attach. <see langword="null"/> or empty returns a no-op scope.</param>
+    /// <returns>An <see cref="IDisposable"/> that ends the scope when disposed; use it with <c>using</c>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="logger"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// C# overload resolution prefers <see cref="WriteScope(ILogger, IDictionary{string, object})"/> for
+    /// <see cref="Dictionary{TKey, TValue}"/> arguments (a more-derived interface wins). This overload
+    /// is chosen automatically when the variable is typed as <see cref="IReadOnlyDictionary{TKey, TValue}"/>
+    /// or any other <see cref="IEnumerable{T}"/> of key/value pairs — no cast required.
+    /// </para>
+    /// <para>
+    /// When the sequence implements <see cref="IReadOnlyCollection{T}"/> or <see cref="ICollection{T}"/>,
+    /// the count is read up front so that small sequences (four entries or fewer) use the same
+    /// allocation-light pre-sized array path as the dictionary overload. Values are always copied.
+    /// </para>
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    public static IDisposable WriteScope(this ILogger logger, IEnumerable<KeyValuePair<string, object>>? context)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+
+        if (context is null)
+        {
+            return NullScope.Instance;
+        }
+
+        int knownCount = context switch
+        {
+            IReadOnlyCollection<KeyValuePair<string, object>> rc => rc.Count,
+            ICollection<KeyValuePair<string, object>> c => c.Count,
+            _ => -1
+        };
+
+        if (knownCount == 0)
+        {
+            return NullScope.Instance;
+        }
+
+        // When count is known and small, allocate exactly the right array up front —
+        // same allocation profile as the IDictionary overload.
+        if (knownCount is > 0 and <= 4)
+        {
+            KeyValuePair<string, object>[] items = new KeyValuePair<string, object>[knownCount];
+            int i = 0;
+            foreach (KeyValuePair<string, object> kv in context)
+            {
+                items[i++] = new KeyValuePair<string, object>(kv.Key, kv.Value ?? "N/A");
+            }
+
+            SmallScopeWrapper wrapper = new(items);
+            return logger.BeginScope(wrapper) ?? new DisposableScope(wrapper);
+        }
+        else
+        {
+            // Count unknown or > 4: enumerate once into a list, then pick the wrapper.
+            List<KeyValuePair<string, object>> safe = knownCount > 0 ? new(knownCount) : [];
+            foreach (KeyValuePair<string, object> kv in context)
+            {
+                safe.Add(new KeyValuePair<string, object>(kv.Key, kv.Value ?? "N/A"));
+            }
+
+            if (safe.Count == 0)
+            {
+                return NullScope.Instance;
+            }
+
+            if (safe.Count <= 4)
+            {
+                SmallScopeWrapper wrapper = new([.. safe]);
+                return logger.BeginScope(wrapper) ?? new DisposableScope(wrapper);
+            }
+
+            ScopeWrapper wrapper2 = new(safe);
+            return logger.BeginScope(wrapper2) ?? new DisposableScope(wrapper2);
         }
     }
 
@@ -1534,15 +2204,17 @@ public static class Nilogger
         public int Count => _items.Count;
         public KeyValuePair<string, object> this[int index] => _items[index];
 
-        public IEnumerator<KeyValuePair<string, object>> GetEnumerator()
-        {
-            return _items.GetEnumerator();
-        }
+        // Return the concrete List<T>.Enumerator struct so that duck-typed foreach
+        // on a ScopeWrapper is allocation-free. The explicit interface implementations
+        // still box, but direct foreach avoids that cost.
+        public List<KeyValuePair<string, object>>.Enumerator GetEnumerator()
+            => _items.GetEnumerator();
+
+        IEnumerator<KeyValuePair<string, object>> IEnumerable<KeyValuePair<string, object>>.GetEnumerator()
+            => _items.GetEnumerator();
 
         IEnumerator IEnumerable.GetEnumerator()
-        {
-            return _items.GetEnumerator();
-        }
+            => _items.GetEnumerator();
 
         [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
         public override string ToString()
@@ -1552,18 +2224,22 @@ public static class Nilogger
                 return string.Empty;
             }
 
-            StringBuilder sb = new(_items.Count * 16);
-            for (int i = 0; i < _items.Count; i++)
+            StringBuilder sb = _sbPool.Get();
+            try
             {
-                if (i > 0)
+                _ = sb.Clear();
+                for (int i = 0; i < _items.Count; i++)
                 {
-                    _ = sb.Append(' ');
+                    if (i > 0) _ = sb.Append(' ');
+                    KeyValuePair<string, object> kv = _items[i];
+                    _ = sb.Append(kv.Key).Append('=').Append(kv.Value);
                 }
-
-                KeyValuePair<string, object> kv = _items[i];
-                _ = sb.Append(kv.Key).Append('=').Append(kv.Value);
+                return sb.ToString();
             }
-            return sb.ToString();
+            finally
+            {
+                _sbPool.Return(sb);
+            }
         }
     }
 
@@ -1637,18 +2313,22 @@ public static class Nilogger
                 return string.Empty;
             }
 
-            StringBuilder sb = new(_items.Length * 16);
-            for (int i = 0; i < _items.Length; i++)
+            StringBuilder sb = _sbPool.Get();
+            try
             {
-                if (i > 0)
+                _ = sb.Clear();
+                for (int i = 0; i < _items.Length; i++)
                 {
-                    _ = sb.Append(' ');
+                    if (i > 0) _ = sb.Append(' ');
+                    KeyValuePair<string, object> kv = _items[i];
+                    _ = sb.Append(kv.Key).Append('=').Append(kv.Value);
                 }
-
-                KeyValuePair<string, object> kv = _items[i];
-                _ = sb.Append(kv.Key).Append('=').Append(kv.Value);
+                return sb.ToString();
             }
-            return sb.ToString();
+            finally
+            {
+                _sbPool.Return(sb);
+            }
         }
     }
 
@@ -1679,6 +2359,8 @@ public static class Nilogger
 
     #region Extensibility Hooks (Async/Batch Ready)
 
+    private static volatile Func<LogLevel, string, Exception, bool> _asyncSinkFilter = static (_, _, _) => true;
+
     /// <summary>
     /// Gets a predicate that decides whether an entry should reach an asynchronous sink.
     /// </summary>
@@ -1691,7 +2373,11 @@ public static class Nilogger
     /// This is a forward-looking hook for callers that wire Nilog into a custom async or
     /// batching pipeline; the core logging methods do not consult it.
     /// </remarks>
-    public static Func<LogLevel, string, Exception, bool> AsyncSinkFilter { get; private set; } = static (_, _, _) => true;
+    public static Func<LogLevel, string, Exception, bool> AsyncSinkFilter
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+        get => _asyncSinkFilter;
+    }
 
     /// <summary>
     /// Replaces the <see cref="AsyncSinkFilter"/> predicate.
@@ -1700,33 +2386,18 @@ public static class Nilogger
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public static void UseAsyncSinkProvider(Func<LogLevel, string, Exception, bool> filter)
     {
-        AsyncSinkFilter = filter ?? AsyncSinkFilter;
+        _asyncSinkFilter = filter ?? _asyncSinkFilter;
     }
 
     /// <summary>
-    /// Flushes any buffered asynchronous logging work.
+    /// A no-op flush placeholder that lets callers <c>await</c> a flush today and keep shutdown code
+    /// correct if a real buffering sink is added in a future version.
     /// </summary>
-    /// <param name="cancellationToken">A token to observe while waiting.</param>
-    /// <returns>A task that completes when the (currently no-op) flush finishes.</returns>
-    /// <remarks>
-    /// A placeholder that lets callers <c>await</c> a flush today and keep that code
-    /// correct if a buffering sink is added later. It never throws: cancellation and
-    /// disposal are swallowed, and any unexpected non-fatal error is traced and ignored.
-    /// </remarks>
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    public static async Task FlushAsync(CancellationToken cancellationToken = default)
+    /// <param name="cancellationToken">Accepted for API compatibility; no buffered work exists so the token is not observed.</param>
+    /// <returns><see cref="Task.CompletedTask"/> — returns synchronously, zero allocation, zero overhead.</returns>
+    public static Task FlushAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await Task.Yield();
-        }
-        catch (OperationCanceledException) { /* Cancellation is expected here; nothing to flush. */ }
-        catch (ObjectDisposedException) { /* Pipeline already torn down; nothing to flush. */ }
-        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
-        {
-            Debug.WriteLine($"Nilogger.FlushAsync encountered error: {ex}");
-        }
+        return Task.CompletedTask;
     }
 
     #endregion Extensibility Hooks (Async/Batch Ready)

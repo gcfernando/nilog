@@ -25,7 +25,7 @@ internal static class NilogStartup
             new
             {
                 title,
-                type = ex.GetType().FullName,
+                type = ex.GetType().FullName ?? ex.GetType().Name,
                 ex.Message,
                 hresult = ex.HResult,
                 inner = ex.InnerException?.Message,

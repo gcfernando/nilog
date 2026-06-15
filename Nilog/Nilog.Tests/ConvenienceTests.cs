@@ -188,4 +188,156 @@ public class ConvenienceTests
         Assert.Equal(count, logger.Entries.Count);
         Assert.Equal(count - 1, logger.Last["N"]);
     }
+
+    // -------------------------------------------------------------------------
+    // Feature C: WriteError / WriteCritical no-args-no-params overloads
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void WriteError_NoArgs_WithException_AttachesExceptionAndLogsMessage()
+    {
+        TestLogger logger = new();
+        InvalidOperationException ex = new("payment declined");
+
+        logger.WriteError("Payment failed", ex);
+
+        Assert.Equal(LogLevel.Error, logger.Single.Level);
+        Assert.Equal("Payment failed", logger.Single.Message);
+        Assert.Same(ex, logger.Single.Exception);
+    }
+
+    [Fact]
+    public void WriteCritical_NoArgs_WithException_AttachesExceptionAndLogsMessage()
+    {
+        TestLogger logger = new();
+        InvalidOperationException ex = new("data corruption");
+
+        logger.WriteCritical("Fatal: data store unrecoverable", ex);
+
+        Assert.Equal(LogLevel.Critical, logger.Single.Level);
+        Assert.Equal("Fatal: data store unrecoverable", logger.Single.Message);
+        Assert.Same(ex, logger.Single.Exception);
+    }
+
+    [Fact]
+    public void WriteError_NoArgs_WhenDisabled_DoesNothing()
+    {
+        TestLogger logger = new() { MinLevel = LogLevel.Critical };
+
+        logger.WriteError("should not appear", new Exception());
+
+        Assert.Empty(logger.Entries);
+    }
+
+    [Fact]
+    public void WriteCritical_NoArgs_WhenDisabled_DoesNothing()
+    {
+        TestLogger logger = new() { Enabled = false };
+
+        logger.WriteCritical("should not appear", new Exception());
+
+        Assert.Empty(logger.Entries);
+    }
+
+    // -------------------------------------------------------------------------
+    // WriteError / WriteCritical — typed, no exception (C# 13 OverloadResolutionPriority fix)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void WriteError_Typed_NoException_OneArg_LogsValueAndNoException()
+    {
+        TestLogger logger = new();
+
+        logger.WriteError("Error happens here {Id}", 124);
+
+        Assert.Equal(LogLevel.Error, logger.Single.Level);
+        Assert.Equal("Error happens here 124", logger.Single.Message);
+        Assert.Equal(124, logger.Single["Id"]);
+        Assert.Null(logger.Single.Exception);
+    }
+
+    [Fact]
+    public void WriteError_Typed_NoException_TwoArgs_LogsBothValues()
+    {
+        TestLogger logger = new();
+
+        logger.WriteError("User {UserId} failed action {Action}", 42, "checkout");
+
+        Assert.Equal(42, logger.Single["UserId"]);
+        Assert.Equal("checkout", logger.Single["Action"]);
+        Assert.Null(logger.Single.Exception);
+    }
+
+    [Fact]
+    public void WriteError_Typed_NoException_ThreeArgs_LogsAllValues()
+    {
+        TestLogger logger = new();
+
+        logger.WriteError("Order {Id} item {Sku} qty {Qty}", 7, "ABC", 3);
+
+        Assert.Equal(7, logger.Single["Id"]);
+        Assert.Equal("ABC", logger.Single["Sku"]);
+        Assert.Equal(3, logger.Single["Qty"]);
+        Assert.Null(logger.Single.Exception);
+    }
+
+    [Fact]
+    public void WriteCritical_Typed_NoException_OneArg_LogsValueAndNoException()
+    {
+        TestLogger logger = new();
+
+        logger.WriteCritical("Critical failure {Code}", 500);
+
+        Assert.Equal(LogLevel.Critical, logger.Single.Level);
+        Assert.Equal("Critical failure 500", logger.Single.Message);
+        Assert.Equal(500, logger.Single["Code"]);
+        Assert.Null(logger.Single.Exception);
+    }
+
+    [Fact]
+    public void WriteError_WithException_StillRoutesToExceptionOverload()
+    {
+        // Verifies that [OverloadResolutionPriority(-1)] on the typed no-exception overload
+        // does NOT shadow WriteError(message, Exception) when an exception is the second arg.
+        TestLogger logger = new();
+        InvalidOperationException ex = new("boom");
+
+        logger.WriteError("Something failed", ex);
+
+        Assert.Same(ex, logger.Single.Exception);
+        Assert.Equal(LogLevel.Error, logger.Single.Level);
+    }
+
+    [Fact]
+    public void WriteCritical_WithException_StillRoutesToExceptionOverload()
+    {
+        TestLogger logger = new();
+        InvalidOperationException ex = new("fatal");
+
+        logger.WriteCritical("Fatal error", ex);
+
+        Assert.Same(ex, logger.Single.Exception);
+        Assert.Equal(LogLevel.Critical, logger.Single.Level);
+    }
+
+    [Fact]
+    public void WriteError_Typed_NoException_WhenDisabled_DoesNothing()
+    {
+        TestLogger logger = new() { Enabled = false };
+
+        logger.WriteError("should not appear {Id}", 99);
+
+        Assert.Empty(logger.Entries);
+    }
+
+    [Fact]
+    public void WriteCritical_Typed_NoException_WhenDisabled_DoesNothing()
+    {
+        TestLogger logger = new() { MinLevel = LogLevel.None };
+
+        logger.WriteCritical("should not appear {Id}", 99);
+
+        Assert.Empty(logger.Entries);
+    }
+
 }

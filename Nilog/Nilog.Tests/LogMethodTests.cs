@@ -92,7 +92,7 @@ public class LogMethodTests
     {
         TestLogger logger = new();
 
-        // Four arguments: no typed overload matches, so the params object[] path runs.
+        // Four arguments: resolves to Log<T0,T1,T2,T3> in v1.0.1+ (zero-array typed path).
         Nilogger.Log(logger, LogLevel.Information, "{A} {B} {C} {D}", 1, 2, 3, 4);
 
         Assert.Equal("1 2 3 4", logger.Single.Message);

@@ -81,9 +81,20 @@ public sealed class OrdersFunction(
                 _logger.WriteDebug("Priced {Sku} x{Qty} @ {Price:N2}", line.Sku, line.Quantity, line.UnitPrice);
             }
 
-            // Template niceties: column alignment + numeric format specifiers.
-            _logger.WriteInformation("Cart {LineCount,2} line(s)  total {Total,10:N2} {Currency}",
-                request.Items.Count, total, request.Currency);
+            // Four typed args — zero array, zero boxing even on the disabled path.
+            // Nilog's new T0..T3 overload handles this without falling back to params.
+            _logger.WriteInformation("Cart {LineCount,2} line(s) total {Total,10:N2} {Currency} for customer {CustomerId}",
+                request.Items.Count, total, request.Currency, request.CustomerId);
+
+            // Business cap — no exception object exists here; the typed no-exception
+            // WriteError overload (v1.0.1) keeps this zero-array and zero-boxing.
+            const decimal MaxTotal = 9_999m;
+            if (total > MaxTotal)
+            {
+                _logger.WriteError("Order {OrderId} total {Total:N2} {Currency} exceeds allowed maximum",
+                    orderId, total, request.Currency);
+                return new UnprocessableEntityObjectResult(new { error = "Order total exceeds the allowed maximum." });
+            }
 
             // --- Inventory reservation (may throw a typed domain exception). ---
             try
@@ -117,8 +128,8 @@ public sealed class OrdersFunction(
                 };
             }
 
-            // --- Shipment: an event with many fields -> the familiar params path (4+ args,
-            //     one array, exactly like the framework). Handy for genuinely wide events. ---
+            // --- Shipment: five fields — the familiar params path (5+ args, one array,
+            //     exactly like the framework). For four or fewer, Nilog stays zero-array. ---
             var shipmentId = Guid.NewGuid();
             var eta = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2));
             _logger.WriteInformation(

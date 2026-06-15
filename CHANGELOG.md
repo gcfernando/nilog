@@ -9,6 +9,129 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Nothing yet._
 
+## [1.0.1] - 2026-06-15
+
+### Added
+
+- **Typed four-argument overloads** (`WriteTrace`, `WriteDebug`, `WriteInformation`,
+  `WriteWarning`, `WriteError`, `WriteCritical`, and `Nilogger.Log` — all now accept a
+  `<T0, T1, T2, T3>` form). The zero-array, zero-boxing disabled path now covers **0–4 typed
+  arguments**, not just 0–3. A disabled call with four args is **479× faster** than the
+  equivalent Microsoft call and allocates **0 bytes**; an enabled call is **41% faster** with
+  **29% less allocation**.
+
+  Internally this required:
+  - A new `LogState<T0, T1, T2, T3>` readonly struct implementing
+    `IReadOnlyList<KeyValuePair<string, object?>>` (indices 0–3 = arguments, index 4 =
+    `{OriginalFormat}`), mirroring the existing 1–3-arg structs.
+  - A new `TemplateFormatter.Format(object, object, object, object)` overload.
+  - A private `Emit<T0,T1,T2,T3>` helper that boxes arguments only on the enabled path.
+
+- **Typed no-exception overloads for `WriteError` and `WriteCritical`** (1–4 arguments).
+  `logger.WriteError("Validation failed for {UserId}", userId)` now resolves to a
+  zero-allocation strongly-typed overload instead of falling back to `params object[]`.
+  Same applies to `WriteCritical`.
+
+  Overload resolution is controlled with C# 13's `[OverloadResolutionPriority]` attribute:
+
+  | Overload | Priority |
+  |---|---|
+  | `WriteError(message, Exception)` and with-exception typed variants | 0 (default) |
+  | `WriteError<T0>(message, T0)` — typed no-exception | -1 |
+  | `WriteError(message, params object[])` — params fallback | -2 |
+
+  A polyfill for `OverloadResolutionPriorityAttribute` is included for .NET 8 targets
+  (the C# 13 compiler recognises it by full name regardless of assembly).
+
+- **`Nilogger.MaxTemplateCacheEntries`** — a configurable ceiling on the number of parsed
+  templates held in the `ConcurrentDictionary` cache (default: 10,000). Once the limit is
+  reached, new templates are still parsed correctly on every call but are **not stored**, so
+  callers who accidentally log interpolated strings (e.g. `$"User {id} logged in"`) can no
+  longer grow the cache without bound. A one-time `Debug.WriteLine` warning fires on the
+  first overflow. The overflow check happens before `GetOrAdd`, so no dictionary entry is
+  created and immediately evicted.
+
+  ```csharp
+  // Tighten the limit for memory-constrained environments (optional):
+  Nilogger.MaxTemplateCacheEntries = 1_000;
+  ```
+
+- **`FourArgTests.cs`** — 12 new xUnit tests covering: render correctness for all six levels
+  at four arguments, disabled-path zero-allocation CI regression guard
+  (`GC.GetAllocatedBytesForCurrentThread` over 10,000 calls), structured property names and
+  `{OriginalFormat}` for the 4-arg path, exception attachment for `WriteError` /
+  `WriteCritical` with and without an exception, and `MaxTemplateCacheEntries` overflow
+  behaviour (still renders correctly beyond the limit).
+
+### Fixed
+
+- **No-arg enabled path was 4.8× slower than Microsoft** (`WriteInformation("text")` and all
+  zero-argument overloads). Root cause: all no-arg log calls were routed through
+  `LoggerMessage.Define<string>(level, id, "{Message}")` which internally called
+  `string.Format("{Message}", message)` on every enabled call — copying the string for no
+  reason and allocating 56 B each time. Replaced with the identity formatter
+  `static (s, _) => s` — the same approach Microsoft uses internally. No intermediate string
+  copy, no allocation.
+
+- **Exception formatter called `GetType()` twice per exception line.** Both
+  `FormatExceptionMessageInternal` and `AppendInnerExceptionDetails` evaluated
+  `ex.GetType().FullName ?? ex.GetType().Name` in a single expression, firing two virtual
+  dispatches when `FullName` was non-null. Cached to a local `Type` variable in both methods.
+
+- **`ScopeWrapper.ToString()` and `SmallScopeWrapper.ToString()` allocated a fresh
+  `StringBuilder` on every call.** Text sinks invoke `ToString()` on each scope per log entry;
+  both classes were doing `new StringBuilder(…)` each time. Both now borrow from the
+  process-wide `_sbPool` (`ObjectPool<StringBuilder>`) in a try/finally block.
+
+### Changed
+
+- **`FlushAsync` simplified to a true no-op.** The method now returns `Task.CompletedTask`
+  directly — no `async` keyword, no state machine, no `Task.Yield`, no cancellation check.
+  Since there is no buffered sink today there is nothing to flush, and the overhead of
+  `Task.Yield` was misleading. Measured cost: **~0.01 ns / 0 B** (below BDN noise floor).
+  `FlushAsyncCore` was removed. Any code that awaited `FlushAsync()` at shutdown continues
+  to work identically; it simply returns synchronously.
+
+- **Typed no-exception `WriteError` / `WriteCritical` params fallbacks** annotated
+  `[OverloadResolutionPriority(-2)]` so they are only selected when no typed overload applies.
+  Existing callers with 5+ arguments are unaffected.
+
+- **Benchmark suite updated** — class 5 renamed to `FourArgBenchmarks` (4-arg typed path),
+  new class 5b `ParamsPathBenchmarks` (5-arg true params fallback), class 6
+  `DisabledAllArgsBenchmarks` extended with 4-arg typed and 5-arg params rows, class 10
+  `RuntimeLevelBenchmarks` extended with `Log<T0,T1,T2,T3>` enabled/disabled cases, class 11
+  `FlushBenchmarks` simplified to non-async `Task`-returning methods with a `Baseline`,
+  class 14 `AllocationStressBenchmarks` extended with 4-arg disabled (0 B) and enabled rows.
+
+- **README** updated with expert-reviewed improvements: `## ⚠️ Limitations` section (honest
+  accounting of where allocation-freedom stops), `## 🏭 Production readiness` table, ASCII bar
+  chart updated with the 4-arg row, stress-test table extended, conservative benchmark wording
+  ("in this benchmark, X was Y× faster"), FlushAsync description updated to "returns
+  `Task.CompletedTask` directly", Best Practices table updated to ≤ 4 named holes, API reference
+  extended with 4-arg overloads and `MaxTemplateCacheEntries`, Roadmap updated.
+
+- **NuGet README** (`README.nuget.md`) rewritten with all new benchmark figures, `Limitations`
+  section, `Production readiness` table, and 4-arg overload documentation.
+
+- **Test suite expanded to 132 tests** (was 120) across net8.0, net9.0, and net10.0.
+
+### Performance
+
+Benchmarks run on .NET 10.0.8, Intel Core i7-13850HX @ 2.10 GHz, BenchmarkDotNet v0.15.8
+(ShortRun: 3 warmup + 3 measurement iterations, Server GC):
+
+| Path | v1.0.0 | v1.0.1 | Δ |
+|------|--------|--------|---|
+| No-arg enabled — `WriteInformation("text")` | 29 ns / 56 B | **4.14 ns / 0 B** | **7× faster, zero alloc** |
+| Feature C — `WriteError("msg", ex)` no args | 36 ns / 72 B | **3.95 ns / 0 B** | **9× faster, zero alloc** |
+| `Nilogger.Log(…)` 0-arg enabled | 27 ns / 40 B | **4.46 ns / 0 B** | **6× faster, zero alloc** |
+| `FlushAsync()` | 1,280 ns / 328 B | **~0.01 ns / 0 B** | **>100,000× faster, zero alloc** |
+| `WriteErrorException(ex)` basic report | 182 ns / 992 B | **99.5 ns / 496 B** | **1.8× faster, 50% less alloc** |
+| **4-arg disabled — `WriteInformation("{A}{B}{C}{D}", …)`** | n/a (params, 113 ns / 192 B) | **0.24 ns / 0 B** | **479× faster vs Microsoft** |
+| **4-arg enabled — `WriteInformation("{A}{B}{C}{D}", …)`** | n/a (params, 122 ns / 192 B) | **71.8 ns / 136 B** | **41% faster, 29% less alloc** |
+
+The 1–3-arg disabled and enabled paths are unchanged from v1.0.0 (they were already correct).
+
 ## [1.0.0] - 2026-06-13
 
 Initial public release. Zero-allocation, high-performance logging extensions for
@@ -66,5 +189,6 @@ see the README for full tables and methodology):
 - XML documentation on every public member, consistent file headers, and centralised analyzer
   suppressions for the deliberate hot-path trade-offs.
 
-[Unreleased]: https://github.com/gcfernando/Nilog/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/gcfernando/Nilog/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/gcfernando/Nilog/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/gcfernando/Nilog/releases/tag/v1.0.0

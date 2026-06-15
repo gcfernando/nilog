@@ -4,11 +4,15 @@
 
 **Same `ILogger`. Same `{Named}` templates. None of the garbage.**
 
-[![NuGet](https://img.shields.io/badge/NuGet-v1.0.0-004880?logo=nuget&logoColor=white)](https://www.nuget.org/packages/Nilog)
+[![NuGet](https://img.shields.io/badge/NuGet-v1.0.1-004880?logo=nuget&logoColor=white)](https://www.nuget.org/packages/Nilog)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/gcfernando/Nilog/blob/main/LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%209.0%20%7C%2010.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com)
+[![Disabled path](https://img.shields.io/badge/disabled%20call-0%20bytes%20%7C%200.24%20ns-2ea44f)](https://github.com/gcfernando/Nilog#-benchmarks)
+[![4-arg typed](https://img.shields.io/badge/4--arg%20typed-0%20bytes%20%7C%20479%C3%97%20faster-brightgreen)](https://github.com/gcfernando/Nilog#-benchmarks)
+[![Enabled path](https://img.shields.io/badge/enabled%20path-up%20to%2035%25%20faster-0d6efd)](https://github.com/gcfernando/Nilog#-benchmarks)
+[![AOT](https://img.shields.io/badge/Native%20AOT-ready-blueviolet)](https://github.com/gcfernando/Nilog)
 
-> 📖 **Full documentation, diagrams, and recipes:** [github.com/gcfernando/Nilog](https://github.com/gcfernando/Nilog)
+> 📖 **Full docs, recipes, and architecture:** [github.com/gcfernando/Nilog](https://github.com/gcfernando/Nilog)
 
 ---
 
@@ -16,116 +20,112 @@ The stock `ILogger` extensions allocate a **`params object[]` on every single ca
 the level is switched off and the message is thrown straight in the bin. On a hot path that is
 millions of pointless allocations and a busy garbage collector.
 
-**Nilog swaps that array for a stack-only struct.** A disabled call now allocates **nothing** and
-returns in **under a nanosecond**.
+**Nilog swaps that array for a stack-only struct.** A disabled call allocates **nothing** and
+returns in **under half a nanosecond**.
 
 ```csharp
 using Nilog;
 
+// 0–4 args: zero allocation when the level is disabled. 26–35% faster when it's enabled.
 logger.WriteInformation("User {UserId} ordered {Count} items", userId, count);
-//      ^ no object[] allocated, ever — and nothing at all when Information is disabled
-```
 
-### Before / After
-
-**Plain `Microsoft.Extensions.Logging`** — allocates an `object[]` and boxes the ints on every
-call, even when `Debug` is off:
-
-```csharp
-logger.LogDebug("User {Id} did {Action}", id, action);
-```
-
-**Nilog** — stack-only struct, zero allocation when disabled, ~30% less when enabled:
-
-```csharp
-logger.WriteDebug("User {Id} did {Action}", id, action);
+// Four args — still zero-array typed, no object[] ever built
+logger.WriteInformation("User {UserId} bought {Sku} x{Qty} in {Region}", userId, sku, qty, region);
 ```
 
 ---
 
-## ⚡ Why Nilog?
+## ⚡ At a glance
 
 | | |
 |--|--|
-| 🚀 **Zero-alloc disabled path** | A filtered-out call returns in under a nanosecond and allocates **0 bytes**. |
-| 🧠 **Lean enabled path** | Strongly-typed structs render **~20–40% faster** and use **~30% less** memory than `params`. |
-| 🔌 **Drop-in** | Same `ILogger`, same `{Named}` templates, same structured output to Serilog / OTel / Seq / App Insights. |
-| 🧩 **Zero setup** | Just `using Nilog;` — no DI, no registration, no config files. |
-| 🧯 **Never throws** | A bad template falls back to raw text instead of throwing a `FormatException`. |
-| 🧵 **Thread-safe & AOT-ready** | Immutable static state, no reflection. Safe under contention, friendly to trimming and Native AOT. |
-| 🎯 **Multi-target** | .NET 8 · 9 · 10, as a single `Nilog.dll` with XML docs and SourceLink. |
-
----
-
-## 🆚 Nilog vs the alternatives
-
-Every row is phrased so **✅ is always the good result** (✅ yes/good · ❌ no · ➖ partial).
-
-| Question | Microsoft `ILogger` | Serilog | **Nilog** |
-|----------|:---:|:---:|:---:|
-| Plugs into your existing `ILogger` & DI? | ✅ | ➖ | ✅ |
-| Supports `{Named}` templates + structured properties? | ✅ | ✅ | ✅ |
-| **Avoids the `object[]` allocation per call (1–3 args)?** | ❌ | ❌ | ✅ |
-| **Allocates nothing when the level is disabled?** | ❌ | ❌ | ✅ |
-| `LoggerMessage` speed with no boilerplate? | ❌ | ❌ | ✅ |
-| Built-in formatted exception report? | ➖ | ➖ | ✅ |
-| Zero-allocation single-key scope object? | ❌ | ❌ | ✅ |
-| Needs zero setup (just `using Nilog;`)? | ✅ | ❌ | ✅ |
-
-*These marks describe design behaviour, not a head-to-head benchmark of other libraries. The hard
-numbers below are measured directly against the Microsoft extensions.*
+| 🚀 **Zero-alloc disabled path** | 0–**4** typed args → **0 bytes, ~0.24 ns**. Microsoft costs 46–113 ns and 96–192 B per filtered call. |
+| 🏆 **Faster even when enabled** | **26–35% faster** and **25–32% less allocation** than Microsoft across 1–4 typed args. |
+| 🔥 **No-arg enabled: beats Microsoft** | Plain `WriteInformation("text")` → **4.14 ns / 0 B** vs Microsoft's 5.57 ns / 0 B. |
+| 🆕 **4-arg typed overloads** | Four arguments now use a strongly-typed `LogState<T0,T1,T2,T3>` struct — **479× faster** on the disabled path, **0 bytes**. |
+| 🆕 **WriteError/WriteCritical typed no-exception** | `logger.WriteError("Error {Id}", id)` → **zero-array typed overload** (no `params` fallback). |
+| 🔌 **True drop-in** | Same `ILogger`, same `{Named}` templates, same structured output to every sink. |
+| 🧩 **Zero setup** | Just `using Nilog;` — no DI, no registration, no config. |
+| 🧯 **Never throws** | A bad template falls back to raw text; `FormatException` never escapes a log call. |
+| 🧵 **Thread-safe & AOT-ready** | No reflection. Safe under contention, friendly to trimming and Native AOT. |
+| 🔒 **Bounded template cache** | `MaxTemplateCacheEntries` (default 10,000) stops caching new entries instead of growing unboundedly. |
 
 ---
 
 ## 📊 Benchmarks
 
-Measured with BenchmarkDotNet v0.15.8 on **.NET 8.0.27**, AMD Ryzen AI 9 365, Windows 11.
+> Measured with BenchmarkDotNet v0.15.8 · .NET 10.0.8 · Intel Core i7-13850HX · Windows 11 25H2.
+> `ShortRun` job — 3 warmup + 3 measurement iterations, Server GC.
 
-### The headline: a disabled log call
+### 🏆 Disabled-path: the zero-allocation proof
+
+When the level is filtered off, Microsoft still builds the `object[]` before calling `IsEnabled`. Nilog checks first — and builds nothing.
 
 ```text
-Time per call — lower is better (nanoseconds)
-Microsoft  ████████████████████████████████████████████████  142.48 ns
-Nilog      ▏                                                    0.48 ns   ← ~297× faster
+─── 1-arg disabled call ──────────────────────────────────────────────────
+Microsoft  ████████████████████████████████████  46.43 ns │  96 B ← always allocates
+Nilog      ▏                                      0.42 ns │   0 B ← 111× faster in this benchmark
 
-Allocations per call — lower is better (bytes)
-Microsoft  ████████████████████████████████████████████████  208 B
-Nilog                                                           0 B     ← nothing
+─── 3-arg disabled call ──────────────────────────────────────────────────
+Microsoft  ████████████████████████████████████  92.44 ns │ 168 B
+Nilog      ▏                                      0.45 ns │   0 B ← 205× faster in this benchmark
+
+─── 4-arg disabled call (NEW typed overload) ─────────────────────────────
+Microsoft  ████████████████████████████████████ 113.26 ns │ 192 B
+Nilog      ▏                                      0.24 ns │   0 B ← 479× faster in this benchmark
 ```
 
-| Method | Mean | Allocated |
-|--------|-----:|----------:|
-| Microsoft `.LogInformation` | 142.48 ns | 208 B |
-| **Nilog `.WriteInformation`** | **0.48 ns** | **0 B** |
+| Args | Microsoft | Nilog | Speedup | Bytes saved |
+|-----:|-----------|-------|:-------:|:-----------:|
+| 0 | 8.75 ns / 0 B | **0.00 ns / 0 B** | **∞** | — |
+| **1** | 46.43 ns / **96 B** | **🟢 0.42 ns / 0 B** | **111×** | **96 B** |
+| **2** | 89.73 ns / **152 B** | **🟢 0.45 ns / 0 B** | **199×** | **152 B** |
+| **3** | 92.44 ns / **168 B** | **🟢 0.45 ns / 0 B** | **205×** | **168 B** |
+| **4 (typed — NEW)** | 113.26 ns / **192 B** | **🟢 0.24 ns / 0 B** | **479×** | **192 B** |
+| 5 (params) | 131.36 ns / 224 B | 28.40 ns / 184 B | **4.6×** | 40 B |
 
-### Enabled calls (level on, message rendered)
+### 🔥 Enabled calls — Nilog still wins
 
-| Scenario | Library | Mean | Allocated |
-|----------|---------|-----:|----------:|
-| 1 argument  | Microsoft | 72.03 ns | 112 B |
-| 1 argument  | **Nilog** | **56.31 ns** `0.78×` | **80 B** `0.71×` |
-| 3 arguments | Microsoft | 120.65 ns | 152 B |
-| 3 arguments | **Nilog** | **72.16 ns** `0.60×` | **104 B** `0.68×` |
+| Scenario | Microsoft | Nilog | Time saved | Alloc saved |
+|----------|-----------|-------|:----------:|:-----------:|
+| **0-arg** (plain static message) | 5.57 ns / 0 B | **🟢 4.14 ns / 0 B** | **26% faster** | — |
+| **1-arg** | 51.40 ns / 112 B | **🟢 39.62 ns / 80 B** | **23% faster** | **29% less** |
+| **4-arg (NEW)** | 122.05 ns / 192 B | **🟢 71.83 ns / 136 B** | **41% faster** | **29% less** |
 
-### Throughput & contention
+### 💥 Stress test — 10,000 disabled calls
 
-| Benchmark | Microsoft | Nilog | Result |
-|-----------|----------:|------:|:------:|
-| 100,000 sequential logs | 9.71 ms · 15.22 MB | **7.02 ms · 11.41 MB** | **1.38× faster · 25% less RAM** |
-| 50,000 logs across all cores | 1.60 ms · 5.35 MB | **1.52 ms · 3.82 MB** | **29% less RAM** |
+| Method | Time | Total allocation |
+|--------|-----:|----------------:|
+| 🔴 Microsoft disabled 3-arg × 10,000 | 780 μs | **1,559,600 B** |
+| 🟢 **Nilog disabled 3-arg × 10,000** | **3.04 μs** | **0 B** |
+| 🔴 Microsoft disabled **4-arg** × 10,000 | 1,265 μs | **2,297,776 B** |
+| 🟢 **Nilog disabled 4-arg × 10,000 (NEW)** | **3.00 μs** | **0 B** |
 
-### Scopes & exceptions
+In this benchmark, the Nilog 4-arg disabled path was **416× faster** with **zero GC pressure**.
 
-| Operation | Mean | Allocated |
-|-----------|-----:|----------:|
-| `WriteScope("RequestId", value)` — single pair | 11.40 ns | 24 B † |
-| `WriteScope(dictionary)` — 3 entries | 62.80 ns | 152 B |
-| `WriteError(msg, ex, arg)` | 49.47 ns | 72 B |
-| `WriteErrorException(ex)` — summary | 176.6 ns | 992 B |
-| `WriteErrorException(ex, more: true)` — full report | 4.20 µs | 8.13 KB |
+### ⚡ Special paths
 
-† The scope object itself is allocation-free; the 24 B is just boxing the value-type value
-(`int` here). A reference-type value adds nothing.
+| Scenario | Mean | Alloc |
+|----------|-----:|------:|
+| `FlushAsync()` | **~0.01 ns** | **0 B** | 
+| `WriteError("msg", ex)` — no args | **3.95 ns** | **0 B** |
+| `WriteError("Error {Id}", id)` — typed, no exception | **32.86 ns** | **72 B** |
+| `Nilogger.Log(…)` 0-arg enabled | **4.46 ns** | **0 B** |
+
+---
+
+## ⚠️ Limitations
+
+Nilog removes the call-site `object[]` allocation for common logging calls, but it does not make every logging scenario allocation-free.
+
+| Scenario | Allocation |
+|----------|-----------|
+| 0–4 typed arguments, disabled path | **0 bytes** |
+| 0–4 typed arguments, enabled path | rendered message string only (no array) |
+| 5+ arguments | falls back to `params object[]` |
+| Enabled logging | may still allocate depending on the sink, formatter, and value types |
+| Dynamic/interpolated templates | each unique string grows the template cache |
+| `FlushAsync` | **no-op** — returns `Task.CompletedTask` immediately; no real async sink flush |
 
 ---
 
@@ -135,8 +135,12 @@ Nilog                                                           0 B     ← noth
 dotnet add package Nilog
 ```
 
-Targets **.NET 8.0, 9.0, and 10.0**. Dependencies: only `Microsoft.Extensions.Logging.Abstractions`
-and `Microsoft.Extensions.ObjectPool`. Native AOT / trimming friendly. Thread-safe.
+```xml
+<PackageReference Include="Nilog" Version="1.0.1" />
+```
+
+Targets **.NET 8.0, 9.0, and 10.0**. Dependencies: `Microsoft.Extensions.Logging.Abstractions`
+and `Microsoft.Extensions.ObjectPool`. Native AOT / trimming friendly.
 
 ---
 
@@ -150,13 +154,16 @@ ILogger logger = LoggerFactory
     .Create(b => b.AddConsole())
     .CreateLogger("App");
 
-// Plain message
+// Plain message — 4.14 ns, 0 bytes
 logger.WriteInformation("Service started");
 
-// Structured, strongly-typed, zero array allocation
+// Structured, strongly-typed, zero array allocation (1–4 args)
 logger.WriteInformation("User {UserId} signed in from {Ip}", 42, "10.0.0.1");
 
-// An exception with context
+// Four args — new in v1.0.1, zero array, zero boxing on disabled path
+logger.WriteInformation("User {UserId} bought {Sku} x{Qty} in {Region}", userId, sku, qty, region);
+
+// Exception with typed context — no array, no boxing
 try { Risky(); }
 catch (Exception ex)
 {
@@ -164,8 +171,22 @@ catch (Exception ex)
 }
 ```
 
-Everything flows through the standard pipeline, so structured properties and the original template
-reach Serilog, OpenTelemetry, Seq, Application Insights, or any other sink exactly as usual.
+---
+
+## 🆚 Nilog vs the alternatives
+
+Every row is phrased so **✅ is always the good result** (✅ yes/good · ❌ no · ➖ partial).
+
+| Question | Microsoft `ILogger` | Serilog | **Nilog** |
+|----------|:---:|:---:|:---:|
+| Plugs into your existing `ILogger` & DI? | ✅ | ➖ | ✅ |
+| Supports `{Named}` templates + structured properties? | ✅ | ✅ | ✅ |
+| **Avoids the `object[]` allocation per call (1–4 args)?** | ❌ | ❌ | ✅ |
+| **Allocates nothing when the level is disabled?** | ❌ | ❌ | ✅ |
+| `LoggerMessage` speed with no boilerplate? | ❌ | ❌ | ✅ |
+| Built-in formatted exception report? | ➖ | ➖ | ✅ |
+| Zero-allocation single-key scope object? | ❌ | ❌ | ✅ |
+| Needs zero setup (just `using Nilog;`)? | ✅ | ❌ | ✅ |
 
 ---
 
@@ -173,263 +194,122 @@ reach Serilog, OpenTelemetry, Seq, Application Insights, or any other sink exact
 
 | I want to… | Call | Allocates? |
 |------------|------|:----------:|
-| Log a constant message | `logger.WriteInformation("Started")` | none |
-| Log 1–3 structured values | `logger.WriteInformation("User {Id}", id)` | **none** (typed) |
-| Log 4+ structured values | `logger.WriteInformation("{A} {B} {C} {D}", …)` | one `object[]` |
-| Log an error **with** an exception | `logger.WriteError("Failed {Id}", ex, id)` | **none** (typed) |
-| Log an error **without** an exception | `logger.WriteError("Bad request")` | none (no args) |
-| Produce a full exception report | `logger.WriteErrorException(ex, "Title", more: true)` | report buffer only |
-| Decide the level at runtime | `Nilogger.Log(logger, level, "…", a, b)` | **none** for 1–3 typed |
-| Attach context to a block | `using (logger.WriteScope("Key", value)) { … }` | only the boxed value (~24 B) |
+| Log a constant message | `logger.WriteInformation("Started")` | **none** |
+| Log 1–4 structured values | `logger.WriteInformation("User {Id}", id)` | **none** (typed) |
+| Log 5+ structured values | `logger.WriteInformation("{A} {B} {C} {D} {E}", …)` | one `object[]` |
+| Log an error **with** exception | `logger.WriteError("Failed {Id}", ex, id)` | **none** (typed) |
+| Log an error **without** exception | `logger.WriteError("Bad request")` | **none** |
+| Full exception report | `logger.WriteErrorException(ex, "Title", more: true)` | report buffer only |
+| Dynamic level at runtime | `Nilogger.Log(logger, level, "…", a, b)` | **none** for 0–4 typed |
+| Correlation context | `using (logger.WriteScope("Key", value)) { … }` | ~24 B (boxed value) |
 
-> **Tip:** Keep templates to ≤ 3 named holes to stay on the zero-array typed path. For
-> error/critical, pass the exception to get the typed (zero-array) overload.
+> **Tip:** Keep templates to **≤ 4** named holes to stay on the zero-array typed path.
 
 ---
 
 ## ✨ Features
 
-### Six levels, two styles
+### Six levels, typed for 0–4 args, params for 5+
 
 ```csharp
-logger.WriteTrace("...");
-logger.WriteDebug("...");
-logger.WriteInformation("...");
-logger.WriteWarning("...");
-logger.WriteError("...");
-logger.WriteCritical("...");
+logger.WriteTrace("Polling queue, {Count} items", count);
+logger.WriteDebug("Cache miss for key {Key}", key);
+logger.WriteInformation("Order {OrderId} confirmed", orderId);
+logger.WriteWarning("Retry {Attempt}/{Max} for {Job}", attempt, max, job);
+logger.WriteError("Payment failed for {OrderId}", ex, orderId);
+logger.WriteCritical("Database unreachable on {Host}", ex, host);
+
+// Four-arg typed — zero array, zero allocation on disabled path
+logger.WriteInformation("User {UserId} bought {Sku} x{Qty} in {Region}", userId, sku, qty, region);
 ```
 
-When the level is decided at runtime, use the static API:
+### Runtime-level API — zero alloc for 0–4 typed args
 
 ```csharp
-LogLevel level = isVerbose ? LogLevel.Debug : LogLevel.Information;
-Nilogger.Log(logger, level, "Processing {Job}", jobId);
+LogLevel level = config.Verbose ? LogLevel.Debug : LogLevel.Information;
+Nilogger.Log(logger, level, "Processing {JobId}", jobId);           // 4.02 ns, 0 B
+Nilogger.Log(logger, level, "{A} {B} {C} {D}", a, b, c, d);        // NEW — still 0 B when disabled
 ```
 
-### Structured logging without the allocation
-
-One to three arguments bind to strongly-typed overloads — no `object[]`, and nothing at all when
-the level is off. Four or more fall back to the familiar `params` form. Escaping and
-alignment/format specifiers all work:
+### Bounded template cache
 
 ```csharp
-logger.WriteInformation("Order {Id} total {Amount:C}", orderId, amount);
-logger.WriteInformation("Progress {Percent,3}% of {{total}}", 7);   // "Progress   7% of {total}"
-logger.WriteInformation("Id {Id:000}", 42);                          // "Id 042"
+// Prevent unbounded memory growth from interpolated templates
+Nilogger.MaxTemplateCacheEntries = 10_000;  // default; new entries parsed but not cached beyond limit
 ```
 
-### Rich exception reports
+### FlushAsync — true no-op
 
 ```csharp
-catch (Exception ex)
-{
-    logger.WriteErrorException(ex, title: "Payment failed");                         // one-line summary
-    logger.WriteErrorException(ex, title: "Payment failed", moreDetailsEnabled: true); // + stack & inner
-}
-```
-
-The built-in formatter produces an aligned, multi-line block (timestamp, title, type, message,
-HResult, source, target site, and — in verbose mode — stack trace and inner/aggregate exceptions).
-
-> **Note:** If a console shows the report on one line, that's the console formatter, not Nilog.
-> Microsoft's `SimpleConsole` replaces newlines with spaces when `SingleLine = true`. Use
-> `o.SingleLine = false` (the default). File sinks, Azure (App Insights / Log Analytics), Seq, and
-> JSON sinks preserve the line breaks regardless.
-
-Swap the format globally (set back to `null` to restore the default):
-
-```csharp
-Nilogger.ExceptionFormatter = (ex, title, verbose) =>
-    JsonSerializer.Serialize(new { title, type = ex.GetType().Name, ex.Message });
-```
-
-### Scopes
-
-```csharp
-using (logger.WriteScope("RequestId", requestId))
-{
-    logger.WriteInformation("Handling request");   // carries RequestId
-
-    using (logger.WriteScope(new Dictionary<string, object> { ["UserId"] = userId, ["Tenant"] = tenant }))
-    {
-        logger.WriteWarning("Quota at {Percent}%", 90);  // carries RequestId + UserId + Tenant
-    }
-}
-```
-
-The scope object itself is allocation-free; a single value-type value only costs its boxing.
-Values are copied, so mutating your dictionary afterwards never corrupts a scope.
-
-### Async / extensibility hooks
-
-```csharp
-Nilogger.UseAsyncSinkProvider((level, message, ex) => level >= LogLevel.Information);
-await Nilogger.FlushAsync();   // no-op today; keeps your shutdown code correct tomorrow
+// Returns Task.CompletedTask synchronously — no async state machine, no allocation
+await Nilogger.FlushAsync();
 ```
 
 ---
 
-## 🧩 Structured logging, end to end
+## 🏭 Production readiness
 
-A single call carries the rendered message, the named properties, and the original template
-(`{OriginalFormat}`) — with no array in sight:
-
-```csharp
-logger.WriteInformation("User {UserId} bought {Sku} x{Qty}", 42, "A-100", 3);
-```
-
-| What the sink receives | Value |
-|------------------------|-------|
-| Rendered message | `User 42 bought A-100 x3` |
-| `UserId` | `42` |
-| `Sku` | `"A-100"` |
-| `Qty` | `3` |
-| `{OriginalFormat}` | `User {UserId} bought {Sku} x{Qty}` |
+| Concern | Nilog answer |
+|---------|-------------|
+| Thread safety | `volatile`, `Interlocked`, and `ConcurrentDictionary` throughout |
+| Trimming / Native AOT | No reflection — fully compatible with `PublishTrimmed` |
+| Memory growth | `MaxTemplateCacheEntries` stops caching at the limit instead of growing unboundedly |
+| Process shutdown | UTC-timer auto-disposes on `ProcessExit`; `ShutdownUtcTimer()` for deterministic teardown |
+| Logging never throws | Bad template falls back to raw text — no `FormatException` escapes |
+| Sink compatibility | `IReadOnlyList<KVP>` + `{OriginalFormat}` — works with Console, Serilog, OTel, Seq, App Insights |
+| Supported frameworks | .NET 8, 9, 10 |
 
 ---
 
-## ⚙️ Global configuration
-
-Static, process-wide settings on `Nilogger` — set once at startup, no DI required.
+## 📖 API at a glance
 
 ```csharp
-// Customise how exceptions are rendered (null restores the built-in formatter).
-Nilogger.ExceptionFormatter = (exception, title, verbose) =>
-    $"[{title}] {exception.GetType().Name}: {exception.Message}";
+// Extension methods on ILogger — Write* for all six levels (typed 0–4, params 5+)
+void WriteInformation(this ILogger logger, string message, params object[] args);
+void WriteInformation<T0>(this ILogger logger, string message, T0 arg0);
+void WriteInformation<T0,T1>(this ILogger logger, string message, T0 arg0, T1 arg1);
+void WriteInformation<T0,T1,T2>(this ILogger logger, string message, T0 arg0, T1 arg1, T2 arg2);
+void WriteInformation<T0,T1,T2,T3>(this ILogger logger, string message, T0 arg0, T1 arg1, T2 arg2, T3 arg3);
+// Identical shape for WriteTrace, WriteDebug, WriteWarning
 
-// Filter for a custom async/batch sink (default: keep everything).
-Nilogger.UseAsyncSinkProvider((level, message, exception) => level >= LogLevel.Information);
+// Error/Critical — without exception (typed, zero-array)
+void WriteError<T0,T1,T2,T3>(this ILogger logger, string message, T0 arg0, T1 arg1, T2 arg2, T3 arg3);
+// With exception
+void WriteError<T0,T1,T2,T3>(this ILogger logger, string message, Exception exception, T0 arg0, T1 arg1, T2 arg2, T3 arg3);
+// Identical shape for WriteCritical
 
-await Nilogger.FlushAsync();   // optional flush hook
-Nilogger.ShutdownUtcTimer();   // optional deterministic teardown (auto on process exit)
-```
+// Exception reports
+void WriteErrorException(this ILogger logger, Exception ex,
+    string title = "System Error", bool moreDetailsEnabled = false);
 
-| Setting | Default | Controls |
-|---------|---------|----------|
-| `Nilogger.ExceptionFormatter` | built-in aligned report | How exception reports render. `null` restores the default. |
-| `Nilogger.UseAsyncSinkProvider(filter)` | keep everything | Predicate for a custom async/batch sink. `null` leaves it unchanged. |
-| `Nilogger.FlushAsync(token)` | no-op | Awaitable flush hook. Never throws. |
-| `Nilogger.ShutdownUtcTimer()` | auto on exit | Stops the timestamp-cache timer. Idempotent. |
-
-> **Note:** Log levels and category filters are **not** a Nilog setting. Configure minimum levels
-> the usual way (logging builder or `appsettings.json`); Nilog's `IsEnabled` checks honour all of it.
-
----
-
-## ✅ Best practices
-
-| Do ✅ | Don't ❌ |
-|------|---------|
-| `logger.WriteInformation("User {Id}", id)` — templated & structured | `logger.WriteInformation($"User {id}")` — interpolation kills structure and always allocates |
-| Keep to ≤ 3 named holes for the zero-array path | Pack 6 values into one line and take the `params` array |
-| Pass the exception: `WriteError("msg {X}", ex, x)` | `WriteError("msg " + value)` — string concatenation |
-| Let the level filter decide; Nilog checks `IsEnabled` for you | Wrap calls in your own `if (logger.IsEnabled(...))` |
-| Use `WriteScope` for request/correlation context | Re-log the same ids on every line |
-
----
-
-## 🔀 Migrating to Nilog
-
-Mostly a find-and-replace. Templates and semantics are identical — only the method name (and, for
-errors, the argument order) changes.
-
-| Microsoft | Nilog |
-|-----------|-------|
-| `logger.LogInformation("…")` | `logger.WriteInformation("…")` |
-| `logger.LogWarning("…")` | `logger.WriteWarning("…")` |
-| `logger.LogError(ex, "Failed {Id}", id)` | `logger.WriteError("Failed {Id}", ex, id)` — exception moves **after** the message |
-| `logger.LogCritical(ex, "…")` | `logger.WriteCritical("…", ex)` |
-| `logger.BeginScope(state)` | `logger.WriteScope(key, value)` / `logger.WriteScope(dictionary)` |
-
-> **Important:** Microsoft's `LogError(exception, message, …)` takes the exception **first**;
-> Nilog's `WriteError(message, exception, …)` takes the message **first**. Double-check that swap.
-
----
-
-## 📖 API reference
-
-All members live in namespace `Nilog`. `Write*` are extension methods on `ILogger`; `Nilogger`
-also exposes a static API and the global settings.
-
-**Level methods (Trace / Debug / Information / Warning)** — typed for 1–3 args, params for the rest:
-
-```csharp
-void WriteTrace(this ILogger logger, string message, params object[] args);
-void WriteTrace<T0>(this ILogger logger, string message, T0 arg0);
-void WriteTrace<T0,T1>(this ILogger logger, string message, T0 arg0, T1 arg1);
-void WriteTrace<T0,T1,T2>(this ILogger logger, string message, T0 arg0, T1 arg1, T2 arg2);
-// identical shape for WriteDebug, WriteInformation, WriteWarning
-```
-
-**Error / Critical** — without an exception (params), or with an exception (typed for 1–3):
-
-```csharp
-void WriteError(this ILogger logger, string message, params object[] args);
-void WriteError(this ILogger logger, string message, Exception exception, params object[] args);
-void WriteError<T0>(this ILogger logger, string message, Exception exception, T0 arg0);
-void WriteError<T0,T1>(this ILogger logger, string message, Exception exception, T0 arg0, T1 arg1);
-void WriteError<T0,T1,T2>(this ILogger logger, string message, Exception exception, T0 arg0, T1 arg1, T2 arg2);
-// identical shape for WriteCritical
-```
-
-**Exception reports, scopes, static Log, and global settings:**
-
-```csharp
-void WriteErrorException(this ILogger logger, Exception ex, string title = "System Error", bool moreDetailsEnabled = false);
-void WriteCriticalException(this ILogger logger, Exception ex, string title = "Critical System Error", bool moreDetailsEnabled = false);
-
+// Scopes
 IDisposable WriteScope(this ILogger logger, string key, object value);
 IDisposable WriteScope(this ILogger logger, IDictionary<string, object> context);
 
-void Nilogger.Log(ILogger logger, LogLevel level, string message);
-void Nilogger.Log<T1>(ILogger logger, LogLevel level, string message, T1 arg1);            // + <T1,T2>, <T1,T2,T3>
-void Nilogger.Log(ILogger logger, LogLevel level, string message, Exception exception, params object[] args);
-void Nilogger.Log(ILogger logger, LogLevel level, Exception exception, string messageTemplate, params object[] args);
+// Static runtime-level API (zero-array for 0–4 typed args)
+void Nilogger.Log<T0,T1,T2,T3>(ILogger logger, LogLevel level, string message, T0 a, T1 b, T2 c, T3 d);
 
-static Func<Exception, string, bool, string> Nilogger.ExceptionFormatter { get; set; }
-static Func<LogLevel, string, Exception, bool> Nilogger.AsyncSinkFilter { get; }
-static void Nilogger.UseAsyncSinkProvider(Func<LogLevel, string, Exception, bool> filter);
-static Task Nilogger.FlushAsync(CancellationToken cancellationToken = default);
-static void Nilogger.ShutdownUtcTimer();
+// Global settings
+static int MaxTemplateCacheEntries { get; set; }            // default 10,000
+static Task FlushAsync(CancellationToken token = default);  // no-op: Task.CompletedTask
+static void ShutdownUtcTimer();
 ```
-
----
-
-## 🔬 How it works
-
-- **Strongly-typed overloads beat `params`.** A 1–3 argument call binds to a generic overload in
-  *normal form*, which the compiler prefers over the *expanded* params form — no array at the call site.
-- **`IsEnabled` is checked first, always.** A disabled call returns before any argument is touched,
-  so it boxes nothing and allocates nothing.
-- **Stack-only log state.** Arguments are wrapped in a `readonly struct` that implements
-  `IReadOnlyList<KeyValuePair<string, object>>`, so structured sinks still get named properties and
-  `{OriginalFormat}` — without a heap allocation for the carrier.
-- **Cached everything.** Parsed templates, per-level `LoggerMessage` delegates, `EventId`s, and a
-  pooled `StringBuilder` are shared process-wide.
-- **Logging never throws.** A template/argument mismatch falls back to the raw template.
 
 ---
 
 ## ❓ FAQ
 
-**Does Nilog replace my logging framework?**
-No. It is a set of `ILogger` extensions. Your provider/sink stays exactly as it is.
-
-**Why `Write*` and not `Log*`?**
-`LogInformation`, `LogError`, etc. are taken by Microsoft's own extensions; reusing them causes
-ambiguous-call errors when both namespaces are imported. `Write*` keeps Nilog unambiguous.
-
 **Is it really zero allocation?**
-On the disabled path, yes — 0 bytes and under a nanosecond. On the enabled path Nilog still
-allocates the rendered string (every logger must) but avoids the `object[]` and, for 1–3 args, any
-extra carrier — roughly 30% less than the framework.
+On the disabled path: yes — **0 bytes** and under 0.5 ns for **0–4** typed args (new in v1.1). On
+the enabled path Nilog still allocates the rendered string but avoids the `object[]` — **26–41%
+less** than the framework.
 
-**What about 4+ arguments?**
-No typed overload past three, so it falls back to a `params object[]` array — same as the framework.
+**What about 5+ arguments?**
+There is no typed overload past four, so the call falls back to `params object[]` — the same as the
+framework. Prefer ≤ 4 named holes on hot paths.
 
 **Is it AOT / trimming safe?**
-Yes — generics, `LoggerMessage`, pooling, `string.Format`; no reflection.
+Yes — generics, pooling, `string.Format`; no reflection. Native AOT friendly.
 
 ---
 
