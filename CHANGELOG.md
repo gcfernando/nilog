@@ -9,6 +9,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Nothing yet._
 
+## [1.0.2] - 2026-06-16
+
+### Added
+
+- **Typed five-argument overloads** (`WriteTrace`, `WriteDebug`, `WriteInformation`,
+  `WriteWarning`, `WriteError`, `WriteCritical`, and `Nilogger.Log` — all now accept a
+  `<T0, T1, T2, T3, T4>` form). The zero-array, zero-boxing disabled path now covers
+  **0–5 typed arguments**, not just 0–4. A disabled 5-arg call now allocates **0 bytes**
+  (previously 184 B for the `params object[]` the compiler built before `IsEnabled` ever
+  ran); an enabled 5-arg call is **39% faster and 29% less allocation** than the equivalent
+  Microsoft call.
+
+  Internally this required:
+  - A new `LogState<T0, T1, T2, T3, T4>` readonly struct (indices 0–4 = arguments, index 5
+    = `{OriginalFormat}`), mirroring the existing 0–4-arg structs.
+  - A new `TemplateFormatter.Format`/`Render` overload accepting a fifth argument.
+  - A private `Emit<T0,T1,T2,T3,T4>` helper and a `Log<T0,T1,T2,T3,T4>` static overload.
+  - `[OverloadResolutionPriority(-1)]` on the new no-exception `WriteError`/`WriteCritical`
+    5-arg overloads and on `Log<T0,T1,T2,T3,T4>`, so a call with a leading `Exception`
+    argument still binds to the dedicated exception overload instead of the generic one
+    (same guard pattern already used for the 3- and 4-arg no-exception overloads).
+  - 6+ arguments still fall back to `params object[]`, unchanged.
+
+- **`Nilog.Analyzers`** — a new, separate Roslyn analyzer package. Ships diagnostic
+  **NILOG001**: warns when an interpolated string (`$"..."`) is passed as a Nilog message
+  template, since each call then produces a different literal string, missing the template
+  cache and growing it unboundedly, and the interpolated values never become named
+  structured properties. The analyzer is opt-in — it is **not** referenced by `Nilog.Core`,
+  so existing consumers are unaffected unless they explicitly add it. Covered by 6 new tests
+  in `Nilog.Analyzers.Tests`.
+
+### Changed
+
+- **UTC timestamp cache (used by `WriteErrorException`/`WriteCriticalException`) no longer
+  runs a background `Timer`.** Previously a `System.Threading.Timer` fired every millisecond
+  for the entire process lifetime just to keep the cached timestamp fresh — paid even in
+  processes that never log an exception. It now refreshes lazily on read: a reader compares
+  `Environment.TickCount64` against the last refresh and only reformats if ≥ 1 ms has
+  elapsed. Same effective freshness, zero idle-time cost. `ShutdownUtcTimer()` keeps its
+  exact signature and idempotent behaviour for compatibility; it now simply forces a final
+  refresh rather than disposing a timer.
+
+- **Per-thread single-slot template cache.** `GetFormatter` now checks, via
+  `[ThreadStatic]` fields, whether the template string is reference-equal to the last one
+  that thread resolved (true for the common case of the same call site firing repeatedly in
+  a loop, since message templates are almost always interned string literals) before
+  falling through to the `ConcurrentDictionary` lookup. A miss costs nothing extra; a hit
+  skips the dictionary probe entirely.
+
+- **Plain-placeholder message rendering now uses a stack-allocated `Span<char>` instead of
+  `string.Format`.** Templates with no `:format`/`,align` suffix render through a new
+  `TemplateFormatter.Render` path that writes literal segments and `ISpanFormattable` values
+  directly into a 256-char stack buffer, copying out exactly one final `string` — no
+  `StringBuilder`, no pool, no array. Measured **~12–31% faster** with identical allocation
+  on affected templates. Any template with a format specifier, an alignment suffix, an
+  argument-count mismatch, or output that overflows the stack buffer transparently falls
+  back to the original, byte-identical `string.Format` path, so no existing template's
+  rendered output changes.
+
+- **Sustained/repeated-template throughput improved** as the combined effect of the two
+  changes above: a 100,000-call sequential loop reusing the same template dropped from
+  5.55 ms to **4.74 ms** (now **33% faster than Microsoft**, up from 23%), with identical
+  allocation (11.41 MB).
+
+- **Test suite expanded to 144 tests** (was 132) across net8.0, net9.0, and net10.0, plus a
+  new `Nilog.Analyzers.Tests` project (6 tests) for the analyzer package.
+
+- **Benchmark suite updated (15 classes, was 14)** — new `FiveArgBenchmarks` class added for the
+  5-arg typed path; `ParamsPathBenchmarks` (the true open-ended `params` escape hatch) bumped
+  from 5 to 6 arguments now that 5 is typed; `DisabledAllArgsBenchmarks`'s "5 args (params)"
+  category relabelled "5 args (typed)" with a new "6 args (params)" category added;
+  `AllocationStressBenchmarks` extended with 5-arg disabled/enabled rows for both Nilog and
+  Microsoft, and the stale "new in v1.1" labels removed.
+
+- **`Nilog.Demo` and `Nilog.Function` updated** to reflect the new 5-arg boundary: stale comments
+  describing 5 arguments as "the params path" were fixed, a 5-arg typed example was added to the
+  demo, and `Nilog.Function` now references `Nilog.Analyzers` as a build-time analyzer
+  (`OutputItemType="Analyzer"`) as a worked example of wiring it into a real project.
+
+### Performance
+
+Benchmarks run on .NET 10.0.8, Intel Core i7-13850HX @ 2.10 GHz, BenchmarkDotNet v0.15.8
+(ShortRun: 3 warmup + 3 measurement iterations, Server GC):
+
+| Path | v1.0.1 | v1.0.2 | Δ |
+|------|--------|--------|---|
+| **5-arg disabled** — `WriteInformation("{A}{B}{C}{D}{E}", …)` | params, 28.40 ns / 184 B | **0.25 ns / 0 B** | **~113× faster, zero alloc** |
+| **5-arg enabled** — `WriteInformation("{A}{B}{C}{D}{E}", …)` | params, ~125 ns / 224 B (≈ Microsoft) | **78.15 ns / 160 B** | **39% faster, 29% less alloc than Microsoft** |
+| Plain `{Id}` template render (warm cache) | 37.12 ns / 80 B | **32.78 ns / 80 B** | **~12% faster, same alloc** |
+| Escaped braces + placeholder render | 46.83 ns / 96 B | **32.49 ns / 96 B** | **~31% faster, same alloc** |
+| 100,000-call sequential loop (same template) | 5.55 ms / 11.41 MB | **4.74 ms / 11.41 MB** | **~15% faster, same alloc** |
+| 10,000-call 4-arg enabled loop | 1,216 μs | **807 μs** | **~34% faster** |
+| Exception formatting (basic/full reports) | unchanged | unchanged | no regression from removing the background timer |
+
+Format-specifier and alignment templates, and the 0–4-arg disabled path, are unaffected —
+they were already correct and use the same code as v1.0.1.
+
 ## [1.0.1] - 2026-06-15
 
 ### Added
@@ -189,6 +286,7 @@ see the README for full tables and methodology):
 - XML documentation on every public member, consistent file headers, and centralised analyzer
   suppressions for the deliberate hot-path trade-offs.
 
-[Unreleased]: https://github.com/gcfernando/Nilog/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/gcfernando/Nilog/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/gcfernando/Nilog/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/gcfernando/Nilog/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/gcfernando/Nilog/releases/tag/v1.0.0

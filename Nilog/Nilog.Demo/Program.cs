@@ -47,6 +47,16 @@ ILogger http = factory.CreateLogger("Checkout.Http");
 ILogger profiles = factory.CreateLogger("Checkout.Profiles");
 ILogger reports = factory.CreateLogger("Checkout.Reports");
 
+// -----------------------------------------------------------------------------
+// Best practice: never pass an interpolated string ($"...") as the message.
+//     logger.WriteInformation($"User {userId} signed in");   // ❌ defeats the template
+//                                                             //    cache and loses
+//                                                             //    structured properties
+//     logger.WriteInformation("User {UserId} signed in", userId); // ✅ do this instead
+// Add the `Nilog.Analyzers` package to a project and the first form raises NILOG001
+// at compile time, so this mistake never reaches code review.
+// -----------------------------------------------------------------------------
+
 // A realistic order we will follow through the whole tour.
 var orderId = Guid.Parse("8f3b2c10-7d4e-4a9b-9b1a-2c0f5e6d7a81");
 const int customerId = 480215;
@@ -62,9 +72,9 @@ Section("1. The six levels — a service starting up and handling load");
     startup.WriteCritical("Redis connection pool exhausted — shedding load");
 }
 
-Section("2. Structured logging with typed arguments (1–4, zero array allocation)");
+Section("2. Structured logging with typed arguments (1–5, zero array allocation)");
 {
-    // One to four values bind to strongly-typed overloads: no object[] is built,
+    // One to five values bind to strongly-typed overloads: no object[] is built,
     // and {Named} placeholders flow through as structured properties to your sink.
     orders.WriteInformation("Order {OrderId} placed by customer {CustomerId}", orderId, customerId);
 
@@ -78,13 +88,22 @@ Section("2. Structured logging with typed arguments (1–4, zero array allocatio
     shipping.WriteInformation(
         "User {UserId} shipped order {OrderId} to {Region} — attempt #{Attempt}",
         customerId, orderId, "EU-WEST", 1);
+
+    // Five-argument typed overload (NEW in v1.0.2) — still zero object[], zero boxing
+    // on the disabled path. Before v1.0.2 this fell back to params object[]; now it
+    // stays on the typed LogState<T0..T4> path all the way out to 5 arguments.
+    var shipmentId = Guid.Parse("1a2b3c4d-5e6f-4071-8899-aabbccddeeff");
+    shipping.WriteInformation(
+        "Shipment {ShipmentId} via {Carrier} to {City}, {Country} — ETA {Eta:yyyy-MM-dd}",
+        shipmentId, "DHL", "Berlin", "DE", new DateOnly(2026, 6, 16));
 }
 
-Section("3. More than four values — the familiar params path");
+Section("3. More than five values — the familiar params path");
 {
-    // Five+ arguments transparently use the params object[] overload (one array,
-    // exactly like the framework). Handy when an event genuinely has many fields.
-    var shipmentId = Guid.Parse("1a2b3c4d-5e6f-4071-8899-aabbccddeeff");
+    // Six+ arguments transparently use the params object[] overload (one array,
+    // exactly like the framework). Handy when an event genuinely has many fields —
+    // but prefer splitting into a scope (Section 8) plus ≤ 5 inline values where you can.
+    var shipmentId = Guid.Parse("2b3c4d5e-6f70-4182-99aa-bbccddeeff00");
     shipping.WriteInformation(
         "Shipment {ShipmentId} via {Carrier} ({Service}) to {City}, {Country} — ETA {Eta:yyyy-MM-dd}",
         shipmentId, "DHL", "Express", "Berlin", "DE", new DateOnly(2026, 6, 16));
@@ -124,12 +143,12 @@ Section("5. WriteError / WriteCritical — all three call forms");
         inventory.WriteError("Inventory node check failed — circuit breaker open", ex);
     }
 
-    // ── Form 3: WITHOUT exception, typed args (v1.0.1 NEW) ──────────────────────
+    // ── Form 3: WITHOUT exception, typed args (1–5, extended in v1.0.2) ─────────
     // Before v1.0.1, `WriteError("Failed {Id}", id)` fell back to params object[],
     // boxing the int and building an array. Now it routes to the typed overload
-    // (same zero-array path as WriteInformation/WriteWarning) via
-    // [OverloadResolutionPriority(-1)] — the compiler only picks it when no
-    // with-exception overload is applicable at priority 0.
+    // (same zero-array path as WriteInformation/WriteWarning, extended out to 5
+    // arguments in v1.0.2) via [OverloadResolutionPriority(-1)] — the compiler only
+    // picks it when no with-exception overload is applicable at priority 0.
     orders.WriteError("Order {OrderId} exceeds line-count limit: {Count} lines (max 50)",
         orderId, 51);
     payments.WriteError("Idempotency key collision for merchant {MerchantId}", "MERCH-9912");
@@ -270,8 +289,54 @@ Section("11. Template niceties — alignment, format, and literal braces in a re
     reports.WriteInformation("Template {{OrderId}} expands to {OrderId}", orderId);
 }
 
+Section("12. Retry with backoff — structured attempt logging (real-world resilience)");
+{
+    // Best practice: log every retry attempt at Warning with structured fields (Attempt,
+    // Delay, Reason) so an on-call engineer can see the whole retry history in one query —
+    // never just "retrying..." with no context, and never string-concatenate the reason.
+    bool succeeded = CallFlakyCarrierApi(shipping, orderId, maxAttempts: 3);
+
+    if (!succeeded)
+    {
+        shipping.WriteError("Carrier API call abandoned for order {OrderId} after {Attempts} attempts",
+            orderId, 3);
+    }
+}
+
+Section("13. Redaction — never log secrets, even by accident");
+{
+    const string cardNumber = "4242424242424242";
+
+    // ❌ Don't: logging the full PAN. Even at Debug, this can end up in a sink you don't
+    // control (App Insights, a shipped log file, a support ticket attachment).
+    //     payments.WriteDebug("Charging card {Card}", cardNumber);
+
+    // ✅ Do: log a masked, identifying fragment only — enough to correlate, not enough to leak.
+    payments.WriteInformation("Charging card ending {Last4}", cardNumber[^4..]);
+
+    // The same rule applies to tokens, connection strings, and full email addresses —
+    // log an id or a masked fragment, never the raw secret.
+}
+
+Section("14. Testing — assert on structured output without a real sink");
+{
+    // A minimal in-memory ILogger (see RecordingLogger below) lets a unit test assert on
+    // exactly what Nilog handed to the sink: level, exception, and every named property —
+    // without spinning up Console/Serilog/OpenTelemetry just to verify a log line.
+    RecordingLogger recorder = new();
+
+    recorder.WriteInformation("Order {OrderId} confirmed for {CustomerId}", orderId, customerId);
+
+    RecordingLogger.Entry entry = recorder.Entries[0];
+    bool propertyMatches = Equals(entry["OrderId"], orderId) && Equals(entry["CustomerId"], customerId);
+
+    reports.WriteInformation(
+        "Test assertion — captured {Count} entries, OrderId/CustomerId match: {Matches}",
+        recorder.Entries.Count, propertyMatches);
+}
+
 // -----------------------------------------------------------------------------
-// 12. Graceful shutdown (optional).
+// 15. Graceful shutdown (optional).
 //     Nilog hooks process exit automatically; call this only when you want
 //     deterministic teardown (tests, short-lived hosts). Safe to call twice.
 // -----------------------------------------------------------------------------
@@ -363,9 +428,93 @@ static void VerifyInventoryNode(Guid orderId)
     throw new TimeoutException("inventory-node-1:6379 did not respond within 200 ms");
 }
 
+// -----------------------------------------------------------------------------
+// Retry-with-backoff helper for Section 12. The point isn't the retry mechanics —
+// it's that every attempt, success, and final failure carries structured context
+// (Attempt, Delay, Reason) instead of an unstructured "retrying..." string.
+// -----------------------------------------------------------------------------
+static bool CallFlakyCarrierApi(ILogger logger, Guid orderId, int maxAttempts)
+{
+    for (int attempt = 1; attempt <= maxAttempts; attempt++)
+    {
+        try
+        {
+            // Fails the first two attempts, succeeds on the third — a realistic
+            // "transient failure that resolves itself" shape.
+            if (attempt < 3)
+            {
+                throw new TimeoutException("carrier-api.dhl.com did not respond within 2000 ms");
+            }
+
+            logger.WriteInformation("Carrier API call for order {OrderId} succeeded on attempt {Attempt}",
+                orderId, attempt);
+            return true;
+        }
+        catch (TimeoutException ex) when (attempt < maxAttempts)
+        {
+            int delayMs = 100 * attempt; // simple linear backoff for the demo
+            logger.WriteWarning(
+                "Carrier API call for order {OrderId} failed on attempt {Attempt}, retrying in {DelayMs} ms: {Reason}",
+                orderId, attempt, delayMs, ex.Message);
+        }
+        catch (TimeoutException)
+        {
+            // Final attempt exhausted — let the caller decide how to log the abandonment.
+            return false;
+        }
+    }
+
+    return false;
+}
+
 // A domain-specific exception, the kind you would define in a real payments module.
 internal sealed class PaymentDeclinedException(string reason)
     : Exception($"Payment declined ({reason})")
 {
     public string Reason { get; } = reason;
+}
+
+// -----------------------------------------------------------------------------
+// Minimal in-memory ILogger for Section 14 — demonstrates that you can unit test
+// "did this method log the right structured properties?" without a real sink.
+// A fuller version of this same idea lives in Nilog.Tests/TestLogger.cs.
+// -----------------------------------------------------------------------------
+internal sealed class RecordingLogger : ILogger
+{
+    public sealed class Entry
+    {
+        public LogLevel Level { get; init; }
+        public string Message { get; init; } = "";
+        public IReadOnlyList<KeyValuePair<string, object?>> State { get; init; } = [];
+
+        public object? this[string key] =>
+            State.FirstOrDefault(kv => kv.Key == key).Value;
+    }
+
+    public List<Entry> Entries { get; } = [];
+
+    public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScopeDisposable.Instance;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+        Func<TState, Exception?, string> formatter)
+    {
+        List<KeyValuePair<string, object?>> kvps = [];
+        if (state is IEnumerable<KeyValuePair<string, object>> enumerable)
+        {
+            foreach (KeyValuePair<string, object> kv in enumerable)
+            {
+                kvps.Add(new KeyValuePair<string, object?>(kv.Key, kv.Value));
+            }
+        }
+
+        Entries.Add(new Entry { Level = logLevel, Message = formatter(state, exception), State = kvps });
+    }
+
+    private sealed class NullScopeDisposable : IDisposable
+    {
+        public static readonly NullScopeDisposable Instance = new();
+        public void Dispose() { }
+    }
 }

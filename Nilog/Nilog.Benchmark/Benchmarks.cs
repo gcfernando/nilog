@@ -103,7 +103,7 @@ public class TwoArgBenchmarks
 // 4. THREE-ARG — enabled vs disabled
 // ---------------------------------------------------------------------------
 
-/// <summary>Three strongly-typed arguments: fills every typed Nilog overload slot.</summary>
+/// <summary>Three strongly-typed arguments — squarely in the middle of the typed overload range (0–5 args).</summary>
 [MemoryDiagnoser]
 [CategoriesColumn]
 [GroupBenchmarksBy(BenchmarkLogicalGroupRule.ByCategory)]
@@ -156,13 +156,45 @@ public class FourArgBenchmarks
 }
 
 // ---------------------------------------------------------------------------
-// 5b. PARAMS PATH (5+ args) — true open-ended escape hatch
+// 5b. FIVE-ARG TYPED — new zero-array path (NEW in v1.0.2, was params before)
 // ---------------------------------------------------------------------------
 
 /// <summary>
-/// Five arguments: beyond the typed overloads, so <c>params object[]</c> runs on both sides.
-/// Nilog's <c>IsEnabled</c> guard still fires before the formatter runs, so the disabled path
-/// is still faster than Microsoft — but both allocate the array.
+/// Five arguments now bind to the strongly-typed <c>WriteInformation&lt;T0,T1,T2,T3,T4&gt;</c>
+/// overload (added in v1.0.2) — no <c>object[]</c> on the disabled path, and the same
+/// struct-based rendering as the 1–4 arg paths on the enabled path. Microsoft still
+/// allocates the array.
+/// </summary>
+[MemoryDiagnoser]
+[CategoriesColumn]
+[GroupBenchmarksBy(BenchmarkLogicalGroupRule.ByCategory)]
+public class FiveArgBenchmarks
+{
+    private readonly BenchLogger _enabled = new(enabled: true);
+    private readonly BenchLogger _disabled = new(enabled: false);
+
+    [BenchmarkCategory("Enabled"), Benchmark(Baseline = true, Description = "Microsoft 5 args (params)")]
+    public void Microsoft_Enabled() => _enabled.LogInformation("{A} {B} {C} {D} {E}", 1, 2, 3, 4, 5);
+
+    [BenchmarkCategory("Enabled"), Benchmark(Description = "Nilog 5 args (typed — zero array)")]
+    public void Nilog_Enabled() => _enabled.WriteInformation("{A} {B} {C} {D} {E}", 1, 2, 3, 4, 5);
+
+    [BenchmarkCategory("Disabled"), Benchmark(Baseline = true, Description = "Microsoft 5 args (params)")]
+    public void Microsoft_Disabled() => _disabled.LogInformation("{A} {B} {C} {D} {E}", 1, 2, 3, 4, 5);
+
+    [BenchmarkCategory("Disabled"), Benchmark(Description = "Nilog 5 args (typed — 0 B expected)")]
+    public void Nilog_Disabled() => _disabled.WriteInformation("{A} {B} {C} {D} {E}", 1, 2, 3, 4, 5);
+}
+
+// ---------------------------------------------------------------------------
+// 5c. PARAMS PATH (6+ args) — true open-ended escape hatch
+// ---------------------------------------------------------------------------
+
+/// <summary>
+/// Six arguments: beyond the typed overloads (extended to 5 in v1.0.2), so
+/// <c>params object[]</c> runs on both sides. Nilog's <c>IsEnabled</c> guard still fires
+/// before the formatter runs, so the disabled path is still faster than Microsoft — but
+/// both allocate the array.
 /// </summary>
 [MemoryDiagnoser]
 [CategoriesColumn]
@@ -172,17 +204,17 @@ public class ParamsPathBenchmarks
     private readonly BenchLogger _enabled = new(enabled: true);
     private readonly BenchLogger _disabled = new(enabled: false);
 
-    [BenchmarkCategory("Enabled"), Benchmark(Baseline = true, Description = "Microsoft 5 args")]
-    public void Microsoft_Enabled() => _enabled.LogInformation("{A} {B} {C} {D} {E}", 1, 2, 3, 4, 5);
+    [BenchmarkCategory("Enabled"), Benchmark(Baseline = true, Description = "Microsoft 6 args")]
+    public void Microsoft_Enabled() => _enabled.LogInformation("{A} {B} {C} {D} {E} {F}", 1, 2, 3, 4, 5, 6);
 
-    [BenchmarkCategory("Enabled"), Benchmark(Description = "Nilog 5 args (params fallback)")]
-    public void Nilog_Enabled() => _enabled.WriteInformation("{A} {B} {C} {D} {E}", 1, 2, 3, 4, 5);
+    [BenchmarkCategory("Enabled"), Benchmark(Description = "Nilog 6 args (params fallback)")]
+    public void Nilog_Enabled() => _enabled.WriteInformation("{A} {B} {C} {D} {E} {F}", 1, 2, 3, 4, 5, 6);
 
-    [BenchmarkCategory("Disabled"), Benchmark(Baseline = true, Description = "Microsoft 5 args")]
-    public void Microsoft_Disabled() => _disabled.LogInformation("{A} {B} {C} {D} {E}", 1, 2, 3, 4, 5);
+    [BenchmarkCategory("Disabled"), Benchmark(Baseline = true, Description = "Microsoft 6 args")]
+    public void Microsoft_Disabled() => _disabled.LogInformation("{A} {B} {C} {D} {E} {F}", 1, 2, 3, 4, 5, 6);
 
-    [BenchmarkCategory("Disabled"), Benchmark(Description = "Nilog 5 args (params, IsEnabled guard)")]
-    public void Nilog_Disabled() => _disabled.WriteInformation("{A} {B} {C} {D} {E}", 1, 2, 3, 4, 5);
+    [BenchmarkCategory("Disabled"), Benchmark(Description = "Nilog 6 args (params, IsEnabled guard)")]
+    public void Nilog_Disabled() => _disabled.WriteInformation("{A} {B} {C} {D} {E} {F}", 1, 2, 3, 4, 5, 6);
 }
 
 // ---------------------------------------------------------------------------
@@ -231,11 +263,17 @@ public class DisabledAllArgsBenchmarks
     [BenchmarkCategory("4 args (typed)"), Benchmark(Description = "Nilog — 0 B expected")]
     public void Nilog_Four() => _nl.WriteDebug("{A} {B} {C} {D}", 1, 2, 3, 4);
 
-    [BenchmarkCategory("5 args (params)"), Benchmark(Baseline = true, Description = "Microsoft")]
+    [BenchmarkCategory("5 args (typed)"), Benchmark(Baseline = true, Description = "Microsoft")]
     public void MS_Five() => _ms.LogDebug("{A} {B} {C} {D} {E}", 1, 2, 3, 4, 5);
 
-    [BenchmarkCategory("5 args (params)"), Benchmark(Description = "Nilog")]
+    [BenchmarkCategory("5 args (typed)"), Benchmark(Description = "Nilog — 0 B expected")]
     public void Nilog_Five() => _nl.WriteDebug("{A} {B} {C} {D} {E}", 1, 2, 3, 4, 5);
+
+    [BenchmarkCategory("6 args (params)"), Benchmark(Baseline = true, Description = "Microsoft")]
+    public void MS_Six() => _ms.LogDebug("{A} {B} {C} {D} {E} {F}", 1, 2, 3, 4, 5, 6);
+
+    [BenchmarkCategory("6 args (params)"), Benchmark(Description = "Nilog")]
+    public void Nilog_Six() => _nl.WriteDebug("{A} {B} {C} {D} {E} {F}", 1, 2, 3, 4, 5, 6);
 }
 
 // ---------------------------------------------------------------------------
@@ -497,11 +535,18 @@ public class AllocationStressBenchmarks
             _disabled.WriteInformation("event {Id} value {Val}", i, i * 2L);
     }
 
-    [Benchmark(Description = "Nilog disabled 4-arg typed (0 alloc — new in v1.1)")]
+    [Benchmark(Description = "Nilog disabled 4-arg typed (0 alloc)")]
     public void Nilog_Disabled_4Arg_NoAlloc()
     {
         for (int i = 0; i < N; i++)
             _disabled.WriteInformation("event {A} {B} {C} {D}", i, i * 2L, i * 3L, i * 4L);
+    }
+
+    [Benchmark(Description = "Nilog disabled 5-arg typed (0 alloc — new in v1.0.2)")]
+    public void Nilog_Disabled_5Arg_NoAlloc()
+    {
+        for (int i = 0; i < N; i++)
+            _disabled.WriteInformation("event {A} {B} {C} {D} {E}", i, i * 2L, i * 3L, i * 4L, i * 5L);
     }
 
     [Benchmark(Description = "Microsoft disabled 3-arg (params array each call)")]
@@ -518,6 +563,13 @@ public class AllocationStressBenchmarks
             _disabled.LogInformation("event {A} {B} {C} {D}", i, i * 2L, i * 3L, i * 4L);
     }
 
+    [Benchmark(Description = "Microsoft disabled 5-arg (params array each call)")]
+    public void Microsoft_Disabled_5Arg_Allocs()
+    {
+        for (int i = 0; i < N; i++)
+            _disabled.LogInformation("event {A} {B} {C} {D} {E}", i, i * 2L, i * 3L, i * 4L, i * 5L);
+    }
+
     [Benchmark(Description = "Nilog enabled 1-arg typed")]
     public void Nilog_Enabled_Typed1()
     {
@@ -532,11 +584,18 @@ public class AllocationStressBenchmarks
             _enabled.WriteInformation("event {A} {B} {C}", i, i * 2, i * 3);
     }
 
-    [Benchmark(Description = "Nilog enabled 4-arg typed (new in v1.1)")]
+    [Benchmark(Description = "Nilog enabled 4-arg typed")]
     public void Nilog_Enabled_Typed4()
     {
         for (int i = 0; i < N; i++)
             _enabled.WriteInformation("event {A} {B} {C} {D}", i, i * 2, i * 3, i * 4);
+    }
+
+    [Benchmark(Description = "Nilog enabled 5-arg typed (new in v1.0.2)")]
+    public void Nilog_Enabled_Typed5()
+    {
+        for (int i = 0; i < N; i++)
+            _enabled.WriteInformation("event {A} {B} {C} {D} {E}", i, i * 2, i * 3, i * 4, i * 5);
     }
 
     [Benchmark(Description = "Microsoft enabled 3-arg (params)")]
@@ -551,5 +610,12 @@ public class AllocationStressBenchmarks
     {
         for (int i = 0; i < N; i++)
             _enabled.LogInformation("event {A} {B} {C} {D}", i, i * 2, i * 3, i * 4);
+    }
+
+    [Benchmark(Description = "Microsoft enabled 5-arg (params)")]
+    public void Microsoft_Enabled_Params5()
+    {
+        for (int i = 0; i < N; i++)
+            _enabled.LogInformation("event {A} {B} {C} {D} {E}", i, i * 2, i * 3, i * 4, i * 5);
     }
 }

@@ -110,7 +110,12 @@ public sealed class OrdersFunction(
                 return new ConflictObjectResult(new { error = "Out of stock", sku = ex.Sku });
             }
 
-            // --- Payment (may decline, with a nested transport failure underneath). ---
+            // --- Payment (may decline, with a nested transport failure underneath).
+            //     Transient gateway timeouts are retried with backoff inside
+            //     PaymentGateway.Charge itself - each attempt logs its own structured
+            //     Warning before this call ever sees an exception. Only a genuine
+            //     decline (PaymentDeclinedException) or a timeout that survives every
+            //     retry reaches this catch block. ---
             try
             {
                 string auth = _payments.Charge(orderId, total, request.Currency, request.CardLast4);
@@ -128,8 +133,9 @@ public sealed class OrdersFunction(
                 };
             }
 
-            // --- Shipment: five fields — the familiar params path (5+ args, one array,
-            //     exactly like the framework). For four or fewer, Nilog stays zero-array. ---
+            // --- Shipment: five fields — stays on the typed, zero-array path (v1.0.2
+            //     extended the typed overloads from 4 to 5 arguments). Six or more
+            //     fields fall back to params object[], same as the framework. ---
             var shipmentId = Guid.NewGuid();
             var eta = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2));
             _logger.WriteInformation(

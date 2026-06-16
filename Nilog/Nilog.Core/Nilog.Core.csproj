@@ -11,7 +11,7 @@
 		<!-- ===== NuGet package ===== -->
 		<IsPackable>true</IsPackable>
 		<PackageId>Nilog</PackageId>
-		<Version>1.0.1</Version>
+		<Version>1.0.2</Version>
 		<Description>Zero-allocation, high-performance logging extensions for Microsoft.Extensions.Logging. Strongly-typed overloads that eliminate the params object[] allocation and allocate nothing when a level is disabled.</Description>
 		<PackageTags>logging;performance;high-performance;zero-allocation;ilogger;structured-logging;loggermessage</PackageTags>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
