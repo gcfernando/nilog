@@ -23,13 +23,18 @@ _Nothing yet._
   confirmed by BenchmarkDotNet (8-arg disabled: **0.82 ns / 0 B** vs Microsoft 221 ns / 336 B).
   6+ arguments previously fell back to `params object[]`; that boundary is now **9+**.
 
-- **Three new `Nilog.Analyzers` rules** (1 → 4 total):
+- **Seven new `Nilog.Analyzers` rules** (1 → 8 total — full parity with the SerilogAnalyzer set):
   - **NILOG002** — the `{Placeholder}` count in a constant template does not match the number
     of arguments supplied.
   - **NILOG003** — the template is built with string concatenation (`"a" + b`) or
     `string.Format(...)`, which defeats the template cache and loses named properties.
   - **NILOG004** — the same named `{Placeholder}` appears more than once (silently collides on
     one structured-property key); numeric/positional `{0} {0}` reuse is intentionally allowed.
+  - **NILOG005** (Info) — positional `{0}` placeholders instead of named `{Name}` ones.
+  - **NILOG006** — an `Exception` passed as a template value instead of the exception parameter,
+    which loses its type/message/stack as structured data.
+  - **NILOG007** — a malformed template: an unclosed `{` or an empty `{}` placeholder.
+  - **NILOG008** (Info) — a placeholder name that is not PascalCase (`{userId}` → `{UserId}`).
 
 - **Code fix for NILOG001** — a one-click "Convert to a literal template with arguments"
   refactoring that rewrites `logger.WriteInformation($"User {id}")` into

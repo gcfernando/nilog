@@ -205,6 +205,158 @@ public class MessageTemplateAnalyzerTests
         Assert.DoesNotContain(diagnostics, d => d.Id == MessageTemplateAnalyzer.DuplicatePlaceholderDiagnosticId);
     }
 
+    // ---- NILOG005: positional placeholders ----
+
+    [Fact]
+    public void PositionalPlaceholders_ReportsNilog005()
+    {
+        ImmutableArray<Diagnostic> diagnostics = GetDiagnostics(Usings + """
+            class C
+            {
+                void M(ILogger logger, int a, int b)
+                {
+                    logger.WriteInformation("{0} {1}", a, b);
+                }
+            }
+            """);
+
+        Assert.Contains(diagnostics, d => d.Id == MessageTemplateAnalyzer.PositionalPlaceholderDiagnosticId);
+    }
+
+    [Fact]
+    public void NamedPlaceholders_NoNilog005()
+    {
+        ImmutableArray<Diagnostic> diagnostics = GetDiagnostics(Usings + """
+            class C
+            {
+                void M(ILogger logger, int a, int b)
+                {
+                    logger.WriteInformation("{A} {B}", a, b);
+                }
+            }
+            """);
+
+        Assert.DoesNotContain(diagnostics, d => d.Id == MessageTemplateAnalyzer.PositionalPlaceholderDiagnosticId);
+    }
+
+    // ---- NILOG006: exception passed as a template value ----
+
+    [Fact]
+    public void ExceptionAsTemplateValue_ReportsNilog006()
+    {
+        ImmutableArray<Diagnostic> diagnostics = GetDiagnostics(Usings + """
+            class C
+            {
+                void M(ILogger logger, Exception ex)
+                {
+                    logger.WriteInformation("Failed {Error}", ex);
+                }
+            }
+            """);
+
+        Assert.Contains(diagnostics, d => d.Id == MessageTemplateAnalyzer.ExceptionAsValueDiagnosticId);
+    }
+
+    [Fact]
+    public void ExceptionInExceptionParameter_NoNilog006()
+    {
+        ImmutableArray<Diagnostic> diagnostics = GetDiagnostics(Usings + """
+            class C
+            {
+                void M(ILogger logger, Exception ex, int id)
+                {
+                    logger.WriteError("Failed {Id}", ex, id);
+                }
+            }
+            """);
+
+        Assert.DoesNotContain(diagnostics, d => d.Id == MessageTemplateAnalyzer.ExceptionAsValueDiagnosticId);
+    }
+
+    // ---- NILOG007: malformed template ----
+
+    [Fact]
+    public void UnclosedBrace_ReportsNilog007()
+    {
+        ImmutableArray<Diagnostic> diagnostics = GetDiagnostics(Usings + """
+            class C
+            {
+                void M(ILogger logger)
+                {
+                    logger.WriteInformation("Unclosed {Brace");
+                }
+            }
+            """);
+
+        Assert.Contains(diagnostics, d => d.Id == MessageTemplateAnalyzer.MalformedTemplateDiagnosticId);
+    }
+
+    [Fact]
+    public void EmptyPlaceholder_ReportsNilog007()
+    {
+        ImmutableArray<Diagnostic> diagnostics = GetDiagnostics(Usings + """
+            class C
+            {
+                void M(ILogger logger, int x)
+                {
+                    logger.WriteInformation("Value {:N2}", x);
+                }
+            }
+            """);
+
+        Assert.Contains(diagnostics, d => d.Id == MessageTemplateAnalyzer.MalformedTemplateDiagnosticId);
+    }
+
+    [Fact]
+    public void WellFormedTemplate_NoNilog007()
+    {
+        ImmutableArray<Diagnostic> diagnostics = GetDiagnostics(Usings + """
+            class C
+            {
+                void M(ILogger logger, int id)
+                {
+                    logger.WriteInformation("User {Id} ok", id);
+                }
+            }
+            """);
+
+        Assert.DoesNotContain(diagnostics, d => d.Id == MessageTemplateAnalyzer.MalformedTemplateDiagnosticId);
+    }
+
+    // ---- NILOG008: PascalCase placeholder names ----
+
+    [Fact]
+    public void LowercasePlaceholderName_ReportsNilog008()
+    {
+        ImmutableArray<Diagnostic> diagnostics = GetDiagnostics(Usings + """
+            class C
+            {
+                void M(ILogger logger, int x)
+                {
+                    logger.WriteInformation("User {userId}", x);
+                }
+            }
+            """);
+
+        Assert.Contains(diagnostics, d => d.Id == MessageTemplateAnalyzer.PascalCaseDiagnosticId);
+    }
+
+    [Fact]
+    public void PascalCasePlaceholderName_NoNilog008()
+    {
+        ImmutableArray<Diagnostic> diagnostics = GetDiagnostics(Usings + """
+            class C
+            {
+                void M(ILogger logger, int x)
+                {
+                    logger.WriteInformation("User {UserId}", x);
+                }
+            }
+            """);
+
+        Assert.DoesNotContain(diagnostics, d => d.Id == MessageTemplateAnalyzer.PascalCaseDiagnosticId);
+    }
+
     private static readonly MetadataReference[] s_platformRefs = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
         .Split(System.IO.Path.PathSeparator)
         .Select(path => (MetadataReference)MetadataReference.CreateFromFile(path))

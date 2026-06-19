@@ -14,7 +14,7 @@
 [![Disabled path](https://img.shields.io/badge/disabled%20call-0%20bytes%20%7C%20%3C1%20ns-2ea44f)](#-benchmarks)
 [![Enabled vs MS](https://img.shields.io/badge/enabled%20path-up%20to%2056%25%20faster-0d6efd)](#-benchmarks)
 [![8-arg typed](https://img.shields.io/badge/up%20to%208--arg%20typed-0%20bytes%20%7C%20268%C3%97%20faster-brightgreen)](#-benchmarks)
-[![Analyzer](https://img.shields.io/badge/Nilog.Analyzers-NILOG001--004%20%2B%20codefix-orange)](#-static-analysis-niloganalyzers)
+[![Analyzer](https://img.shields.io/badge/Nilog.Analyzers-NILOG001--008%20%2B%20codefix-orange)](#-static-analysis-niloganalyzers)
 [![AOT](https://img.shields.io/badge/Native%20AOT-enforced-blueviolet)](#-thread-safety-and-lifecycle)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-ff69b4.svg)](#-contributing)
 
@@ -149,7 +149,7 @@ Nilog removes the call-site `object[]` allocation for common logging calls, but 
 | 🆕 **WriteError/WriteCritical typed no-exception** | `logger.WriteError("Failed {Id}", id)` routes to a **zero-array typed overload** — no `params` fallback, no boxing. |
 | 🆕 **Span-based rendering (1–8 args)** | Plain `{Name}` templates render through a stack-allocated `Span<char>` — no `StringBuilder`, no pool, no array. |
 | 🆕 **Real `FlushAsync` (v1.0.3)** | `RegisterFlush(...)` lets buffering sinks drain on `FlushAsync()`; a zero-allocation no-op when nothing is registered. |
-| 🆕 **4 analyzer rules + a code fix (v1.0.3)** | `Nilog.Analyzers` flags interpolation (NILOG001, with a one-click fix), count mismatch (NILOG002), concatenated templates (NILOG003), and duplicate placeholders (NILOG004). |
+| 🆕 **8 analyzer rules + a code fix (v1.0.3)** | `Nilog.Analyzers` flags interpolation (NILOG001, one-click fix), count mismatch (002), concatenated templates (003), duplicate (004), positional (005), exception-as-value (006), malformed (007), and non-PascalCase (008) — full parity with SerilogAnalyzer. |
 | 🆕 **Native AOT — compiler-enforced** | `IsAotCompatible=true` runs the trim/AOT analyzers on every build; the Native AOT compiler emits native code from `Nilog.dll` with zero warnings. |
 | 🔌 **Drop-in (any engine, any cloud)** | Same `ILogger`, same `{Named}` templates, same structured output to Serilog / NLog / OTel / Seq / App Insights — verified through the real MEL pipeline. |
 | 🧩 **Zero setup** | Just `using Nilog;` — no DI, no registration, no config files. |
@@ -176,7 +176,7 @@ already use. The table below compares the *call-site cost* of writing a log line
 | Gets `LoggerMessage` speed with no boilerplate? | ❌ | ❌ | ✅ |
 | Has a built-in formatted exception report? | ➖ <sup>2</sup> | ➖ <sup>2</sup> | ✅ |
 | Offers a zero-allocation single-key scope? | ❌ | ❌ | ✅ |
-| Catches interpolation / mismatch footguns at compile time? | ❌ | ❌ | ✅ (4 rules + code fix) |
+| Catches interpolation / mismatch footguns at compile time? | ❌ | ❌ | ✅ (8 rules + code fix) |
 | Native AOT / trimming, compiler-enforced? | ➖ | ➖ | ✅ |
 | Needs zero setup (just `using Nilog;`)? | ✅ | ❌ <sup>3</sup> | ✅ |
 
@@ -718,10 +718,10 @@ warning:
 logger.WriteInformation($"User {id} signed in"); // compiles fine. silently undoes everything above.
 ```
 
-`Nilog.Analyzers` is a separate, **opt-in** Roslyn analyzer package (4 rules + a code fix as of
-v1.0.3) that exists to catch exactly this and three related footguns. It is **not** referenced by
-`Nilog.Core` — installing `Nilog` never pulls it in — so adding it is a deliberate choice with
-zero risk to anyone who doesn't.
+`Nilog.Analyzers` is a separate, **opt-in** Roslyn analyzer package (**8 rules + a code fix** as of
+v1.0.3 — full parity with the established SerilogAnalyzer rule set) that exists to catch exactly
+this and seven related footguns. It is **not** referenced by `Nilog.Core` — installing `Nilog`
+never pulls it in — so adding it is a deliberate choice with zero risk to anyone who doesn't.
 
 ### Why this one mistake matters so much
 
@@ -741,6 +741,10 @@ zero risk to anyone who doesn't.
 | `NILOG002` | Warning | A constant template's `{Placeholder}` count does not match the number of arguments supplied | — |
 | `NILOG003` | Warning | The template is built with string concatenation (`"a" + b`) or `string.Format(...)` | — |
 | `NILOG004` | Warning | The same named `{Placeholder}` appears more than once (duplicate structured-property key) | — |
+| `NILOG005` | Info | Positional `{0}` placeholders used instead of named `{Name}` ones | — |
+| `NILOG006` | Warning | An `Exception` is passed as a template value instead of the exception parameter | — |
+| `NILOG007` | Warning | The template is malformed — an unclosed `{` or an empty `{}` placeholder | — |
+| `NILOG008` | Info | A placeholder name is not PascalCase (e.g. `{userId}` → `{UserId}`) | — |
 
 It fires identically across every call shape Nilog exposes — extension methods, the static API,
 with or without an exception. **NILOG001** also offers a one-click *"Convert to a literal template
@@ -758,6 +762,14 @@ logger.WriteInformation("{A} {B}", a);
 logger.WriteInformation("User " + id + " signed in");
 // ❌ NILOG004 — {Id} used twice; the second silently overwrites the first.
 logger.WriteInformation("{Id} retried {Id}", a, b);
+// 🔵 NILOG005 (Info) — positional placeholders; prefer named ones.
+logger.WriteInformation("{0} {1}", a, b);
+// ❌ NILOG006 — exception passed as a value; use the exception parameter.
+logger.WriteInformation("Failed {Error}", ex);
+// ❌ NILOG007 — malformed template (unclosed brace).
+logger.WriteInformation("Unclosed {Brace");
+// 🔵 NILOG008 (Info) — placeholder name should be PascalCase.
+logger.WriteInformation("User {userId}", id);
 
 // ✅ No diagnostic — one cached template per call site, every value a real structured property.
 logger.WriteInformation("User {UserId} signed in", id);
@@ -804,7 +816,8 @@ affecting any other warning in the project:
 
 ```xml
 <PropertyGroup>
-  <WarningsAsErrors>$(WarningsAsErrors);NILOG001;NILOG002;NILOG003;NILOG004</WarningsAsErrors>
+  <!-- Promote the correctness rules; NILOG005/008 are Info-only style suggestions. -->
+  <WarningsAsErrors>$(WarningsAsErrors);NILOG001;NILOG002;NILOG003;NILOG004;NILOG006;NILOG007</WarningsAsErrors>
 </PropertyGroup>
 ```
 
@@ -1289,11 +1302,14 @@ Yes. Named holes become structured properties and the original template is prese
 <details>
 <summary><b>What does <code>Nilog.Analyzers</code> actually check?</b></summary>
 
-Four rules (v1.0.3): **NILOG001** (interpolated `$"..."` template, with a one-click code fix),
-**NILOG002** (placeholder/argument count mismatch), **NILOG003** (concatenated or `string.Format`
-template), and **NILOG004** (duplicate named placeholder) — across every `Write*`/`Nilogger.Log`
-call shape. The checks are syntax/semantics-based at the call site; interpolation hidden behind a
-local (`var msg = $"..."; logger.Write(msg)`) would need data-flow analysis and is out of scope.
+Eight rules (v1.0.3), full parity with the SerilogAnalyzer set: **NILOG001** (interpolated `$"..."`
+template, with a one-click code fix), **NILOG002** (placeholder/argument count mismatch),
+**NILOG003** (concatenated or `string.Format` template), **NILOG004** (duplicate named placeholder),
+**NILOG005** (positional `{0}` instead of named, Info), **NILOG006** (an exception passed as a
+template value), **NILOG007** (malformed template — unclosed/empty placeholder), and **NILOG008**
+(non-PascalCase placeholder name, Info) — across every `Write*`/`Nilogger.Log` call shape. The
+checks are syntax/semantics-based at the call site; interpolation hidden behind a local
+(`var msg = $"..."; logger.Write(msg)`) would need data-flow analysis and is out of scope.
 See [Static analysis](#-static-analysis-niloganalyzers).
 </details>
 
