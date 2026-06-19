@@ -12,3 +12,9 @@
 /Nilog/Nilog.Tests/bin
 /Nilog/Nilog.Tests/obj
 /Nilog/.vs/ProjectEvaluation
+/Nilog/Nilog.Analyzers/bin
+/Nilog/Nilog.Analyzers/obj
+/Nilog/Nilog.Analyzers.Tests/bin
+/Nilog/Nilog.Analyzers.Tests/obj
+/Nilog/Nilog.SourceGenerators/bin
+/Nilog/Nilog.SourceGenerators/obj
