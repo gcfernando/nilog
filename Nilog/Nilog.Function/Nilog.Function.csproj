@@ -24,11 +24,12 @@
 	<ItemGroup>
 		<ProjectReference Include="..\Nilog.Core\Nilog.Core.csproj" />
 
-		<!-- Best practice: lint for the interpolated-string footgun at build time.
-		     This sample wires the analyzer in-repo via ProjectReference with
-		     OutputItemType="Analyzer"; once Nilog.Analyzers ships as a NuGet package,
-		     consumers would instead add:
-		         <PackageReference Include="Nilog.Analyzers" Version="x.y.z" PrivateAssets="all" /> -->
+		<!-- Best practice: lint for the structured-logging footguns at build time
+		     (NILOG001 interpolation — with a one-click code fix, NILOG002 placeholder/arg
+		     mismatch, NILOG003 concatenated/string.Format templates, NILOG004 duplicate
+		     placeholder name). This sample wires the analyzer in-repo via ProjectReference
+		     with OutputItemType="Analyzer"; consumers instead add the shipped package:
+		         <PackageReference Include="Nilog.Analyzers" Version="1.0.3" PrivateAssets="all" /> -->
 		<ProjectReference Include="..\Nilog.Analyzers\Nilog.Analyzers.csproj"
 		                  OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>

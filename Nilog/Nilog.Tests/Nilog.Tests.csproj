@@ -26,4 +26,17 @@
 		<ProjectReference Include="..\Nilog.Core\Nilog.Core.csproj" />
 	</ItemGroup>
 
+	<!-- The concrete LoggerFactory lives in Microsoft.Extensions.Logging (not Abstractions);
+	     the interop tests use it to run Nilog through the real MEL provider pipeline. Versions
+	     track Nilog.Core's Abstractions versions (released in lockstep). -->
+	<ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+		<PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
+	</ItemGroup>
+	<ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
+		<PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.0" />
+	</ItemGroup>
+	<ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+		<PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.0" />
+	</ItemGroup>
+
 </Project>

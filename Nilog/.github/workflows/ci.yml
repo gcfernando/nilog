@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-test:
+    name: Build, test & allocation gate
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8/9/10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore Nilog.sln
+
+      # Release build enforces the trim/AOT analyzers + TreatWarningsAsErrors on Nilog.Core,
+      # so any reflection or AOT-unsafe construct fails the build here.
+      - name: Build (Release, warnings-as-errors)
+        run: dotnet build Nilog.sln -c Release --no-restore
+
+      # The disabled-path "AllocatesZeroBytes" tests (Nilog.Tests: FourArgTests, FiveArgTests,
+      # HighArityTests) assert exactly 0 bytes allocated. They are the allocation regression
+      # gate — any change that reintroduces a per-call array/boxing on the disabled path turns
+      # this step red. Run in Release so JIT optimizations match the shipped assembly.
+      - name: Test + allocation gate (Release)
+        run: dotnet test Nilog.sln -c Release --no-build --verbosity normal

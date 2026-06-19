@@ -38,7 +38,7 @@ namespace Nilog;
 /// dispose before you start logging.
 /// </para>
 /// </remarks>
-public static class Nilogger
+public static partial class Nilogger
 {
     // Best-effort cleanup: force one final UTC timestamp refresh when the process or
     // AppDomain is going away, so the cache reflects the true shutdown time.
@@ -480,6 +480,18 @@ public static class Nilogger
             catch (FormatException) { return Template; }
         }
 
+        // Array-based fallback used by the source-generated high-arity (6+ argument) typed
+        // overloads, where there is no fixed Format(object, …) shape to bind to. An explicit
+        // object?[] argument binds here rather than to Format(object a0) because object?[] is
+        // a more specific match for the parameter than object. Same never-throw contract as
+        // the fixed-arity overloads above.
+        public string Format(params object?[] args)
+        {
+            try
+            { return string.Format(CultureInfo.InvariantCulture, _format, args); }
+            catch (FormatException) { return Template; }
+        }
+
         // Stack buffer size for the fast render path below. Generous enough for the vast
         // majority of log lines; anything larger simply falls back to Format(), so there
         // is no correctness ceiling - only a performance one.
@@ -493,19 +505,17 @@ public static class Nilogger
         // alignment, an argument-count mismatch, or output that overflows the stack
         // buffer) defers to the battle-tested Format() overloads above, so behaviour for
         // every existing template is unchanged.
+        // Supports up to eight arguments so the source-generated 6-8 arg overloads render
+        // through the same allocation-free span path as the hand-written 1-5 arg ones,
+        // instead of building an object?[] in ToString(). Arguments 6-8 default to null so
+        // every existing 1-5 arg caller is unaffected.
         [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-        public string Render(int argCount, object? a0, object? a1 = null, object? a2 = null, object? a3 = null, object? a4 = null)
+        public string Render(int argCount, object? a0, object? a1 = null, object? a2 = null, object? a3 = null, object? a4 = null,
+            object? a5 = null, object? a6 = null, object? a7 = null)
         {
             if (_hasFormatSpecifiers || _maxArgIndex >= argCount)
             {
-                return argCount switch
-                {
-                    1 => Format(a0!),
-                    2 => Format(a0!, a1!),
-                    3 => Format(a0!, a1!, a2!),
-                    4 => Format(a0!, a1!, a2!, a3!),
-                    _ => Format(a0!, a1!, a2!, a3!, a4!),
-                };
+                return FormatFallback(argCount, a0, a1, a2, a3, a4, a5, a6, a7);
             }
 
             Span<char> buffer = stackalloc char[StackBufferChars];
@@ -516,24 +526,37 @@ public static class Nilogger
                 Segment seg = segments[i];
                 bool ok = seg.ArgIndex < 0
                     ? TryWriteLiteral(seg.Literal!, buffer, ref pos)
-                    : TryWriteValue(seg.ArgIndex switch { 0 => a0, 1 => a1, 2 => a2, 3 => a3, _ => a4 }, buffer, ref pos);
+                    : TryWriteValue(seg.ArgIndex switch { 0 => a0, 1 => a1, 2 => a2, 3 => a3, 4 => a4, 5 => a5, 6 => a6, _ => a7 }, buffer, ref pos);
 
                 if (!ok)
                 {
                     // Buffer overflow on an unusually large value - fall back rather than
                     // truncate. Rare in practice; correctness wins over the fast path.
-                    return argCount switch
-                    {
-                        1 => Format(a0!),
-                        2 => Format(a0!, a1!),
-                        3 => Format(a0!, a1!, a2!),
-                        4 => Format(a0!, a1!, a2!, a3!),
-                        _ => Format(a0!, a1!, a2!, a3!, a4!),
-                    };
+                    return FormatFallback(argCount, a0, a1, a2, a3, a4, a5, a6, a7);
                 }
             }
 
             return new string(buffer[..pos]);
+        }
+
+        // Slow path shared by Render: templates with format specifiers/alignment, an
+        // argument-count mismatch, or stack-buffer overflow defer to string.Format. Only the
+        // 6-8 arg cases build an object?[]; the common 1-5 plain-template path never reaches
+        // here. NoInlining keeps it off Render's hot path.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private string FormatFallback(int argCount, object? a0, object? a1, object? a2, object? a3, object? a4, object? a5, object? a6, object? a7)
+        {
+            return argCount switch
+            {
+                1 => Format(a0!),
+                2 => Format(a0!, a1!),
+                3 => Format(a0!, a1!, a2!),
+                4 => Format(a0!, a1!, a2!, a3!),
+                5 => Format(a0!, a1!, a2!, a3!, a4!),
+                6 => Format(new object?[] { a0, a1, a2, a3, a4, a5 }),
+                7 => Format(new object?[] { a0, a1, a2, a3, a4, a5, a6 }),
+                _ => Format(new object?[] { a0, a1, a2, a3, a4, a5, a6, a7 }),
+            };
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1027,15 +1050,14 @@ public static class Nilogger
     /// <param name="arg4">The value for the fifth placeholder.</param>
     /// <exception cref="ArgumentNullException"><paramref name="logger"/> is <see langword="null"/>.</exception>
     /// <remarks>
-    /// <see cref="OverloadResolutionPriorityAttribute"/>(-1) keeps this below
-    /// <see cref="Log(ILogger, LogLevel, string, Exception, object[])"/>: without it, a call
-    /// like <c>Log(logger, level, "{A}", someException, b, c, d, e)</c> would bind here (an
-    /// exact 5-type-argument normal-form match beats the Exception overload's expanded
-    /// params form) and silently log the exception as a plain template value instead of
-    /// attaching it.
+    /// This typed overload stays at the default priority so a plain 5-argument call binds here
+    /// (zero array). Correct binding when a trailing <see cref="Exception"/> is passed -
+    /// <c>Log(logger, level, "{A}", someException, b, c, d, e)</c> - is handled by giving the
+    /// <see cref="Log(ILogger, LogLevel, string, Exception, object[])"/> overload a higher
+    /// <see cref="OverloadResolutionPriorityAttribute"/> instead, so it wins only when an
+    /// Exception is actually supplied.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    [OverloadResolutionPriority(-1)]
     public static void Log<T0, T1, T2, T3, T4>(ILogger logger, LogLevel level, string message, T0 arg0, T1 arg1, T2 arg2, T3 arg3, T4 arg4)
     {
         ArgumentNullException.ThrowIfNull(logger);
@@ -1099,10 +1121,15 @@ public static class Nilogger
     /// <param name="args">The template arguments. When empty, the fast no-argument path is used.</param>
     /// <exception cref="ArgumentNullException"><paramref name="logger"/> is <see langword="null"/>.</exception>
     /// <remarks>
-    /// Prefer the strongly-typed overloads for one to three arguments; this overload
-    /// allocates a <c>params</c> array and exists for the open-ended case.
+    /// Prefer the strongly-typed overloads for the no-exception case; this overload allocates a
+    /// <c>params</c> array and exists for attaching an exception plus an open-ended argument list.
+    /// <see cref="OverloadResolutionPriorityAttribute"/>(1) ensures that when a trailing
+    /// <see cref="Exception"/> is supplied this overload wins over the typed
+    /// <c>Log&lt;T0..Tn&gt;</c> overloads (so the exception is attached, not logged as a value),
+    /// while a plain typed call with no exception still binds to the zero-array typed overload.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    [OverloadResolutionPriority(1)]
     public static void Log(ILogger logger, LogLevel level, string message, Exception exception, params object[] args)
     {
         ArgumentNullException.ThrowIfNull(logger);
@@ -2383,8 +2410,10 @@ public static class Nilogger
                 .Append("Exception Type : ").AppendLine(exType.FullName ?? exType.Name)
                 .Append("Message        : ").AppendLine(ex.Message?.Trim() ?? "N/A")
                 .Append("HResult        : ").Append(ex.HResult).AppendLine()
-                .Append("Source         : ").AppendLine(ex.Source ?? "N/A")
-                .Append("Target Site    : ").AppendLine(ex.TargetSite?.Name ?? "N/A");
+                .Append("Source         : ").AppendLine(ex.Source ?? "N/A");
+            // Note: Exception.TargetSite is deliberately not reported - it is annotated
+            // [RequiresUnreferencedCode] (trim/AOT-unsafe) and is redundant with the stack
+            // trace below. Omitting it keeps Nilog fully Native-AOT and trimming compatible.
 
             if (moreDetailsEnabled)
             {
@@ -2433,8 +2462,8 @@ public static class Nilogger
         _ = sb.Append(indent).Append(" Exception Type : ").AppendLine(innerType.FullName ?? innerType.Name)
             .Append(indent).Append(" Message        : ").AppendLine(inner.Message?.Trim() ?? "N/A")
             .Append(indent).Append(" HResult        : ").Append(inner.HResult).AppendLine()
-            .Append(indent).Append(" Source         : ").AppendLine(inner.Source ?? "N/A")
-            .Append(indent).Append(" Target Site    : ").AppendLine(inner.TargetSite?.Name ?? "N/A");
+            .Append(indent).Append(" Source         : ").AppendLine(inner.Source ?? "N/A");
+        // TargetSite omitted for trim/AOT safety (see FormatExceptionMessageInternal).
 
         string? st = inner.StackTrace;
         if (!string.IsNullOrWhiteSpace(st))
@@ -2896,15 +2925,120 @@ public static class Nilogger
         _asyncSinkFilter = filter ?? _asyncSinkFilter;
     }
 
+    // Flush callbacks registered by buffering/batching sinks (e.g. file, Seq, OpenTelemetry,
+    // Application Insights) so FlushAsync can actually drain them. Stored in a copy-on-write
+    // array: registration is rare, FlushAsync reads a single volatile reference, and when
+    // nothing is registered FlushAsync stays a zero-allocation no-op (backward compatible).
+    private static volatile Func<CancellationToken, Task>[] _flushCallbacks = Array.Empty<Func<CancellationToken, Task>>();
+    private static readonly object _flushLock = new();
+
     /// <summary>
-    /// A no-op flush placeholder that lets callers <c>await</c> a flush today and keep shutdown code
-    /// correct if a real buffering sink is added in a future version.
+    /// Registers an asynchronous flush callback to be awaited by <see cref="FlushAsync"/>.
     /// </summary>
-    /// <param name="cancellationToken">Accepted for API compatibility; no buffered work exists so the token is not observed.</param>
-    /// <returns><see cref="Task.CompletedTask"/> — returns synchronously, zero allocation, zero overhead.</returns>
+    /// <param name="flush">
+    /// A delegate that drains a buffering/batching sink. It is invoked once per
+    /// <see cref="FlushAsync"/> call, in registration order, and is passed the caller's
+    /// cancellation token.
+    /// </param>
+    /// <exception cref="ArgumentNullException"><paramref name="flush"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// This is how Nilog supports a real flush without owning a sink: a sink (or the host's
+    /// shutdown code) registers how to drain its own buffers, and <see cref="FlushAsync"/>
+    /// awaits them all. If nothing is registered, <see cref="FlushAsync"/> remains a no-op.
+    /// </remarks>
+    public static void RegisterFlush(Func<CancellationToken, Task> flush)
+    {
+        ArgumentNullException.ThrowIfNull(flush);
+        lock (_flushLock)
+        {
+            Func<CancellationToken, Task>[] current = _flushCallbacks;
+            var updated = new Func<CancellationToken, Task>[current.Length + 1];
+            Array.Copy(current, updated, current.Length);
+            updated[current.Length] = flush;
+            _flushCallbacks = updated;
+        }
+    }
+
+    /// <summary>
+    /// Removes a flush callback previously registered with <see cref="RegisterFlush"/>.
+    /// </summary>
+    /// <param name="flush">The delegate to remove.</param>
+    /// <returns><see langword="true"/> if a matching callback was found and removed; otherwise <see langword="false"/>.</returns>
+    public static bool UnregisterFlush(Func<CancellationToken, Task> flush)
+    {
+        if (flush is null)
+        {
+            return false;
+        }
+
+        lock (_flushLock)
+        {
+            Func<CancellationToken, Task>[] current = _flushCallbacks;
+            int index = Array.IndexOf(current, flush);
+            if (index < 0)
+            {
+                return false;
+            }
+
+            if (current.Length == 1)
+            {
+                _flushCallbacks = Array.Empty<Func<CancellationToken, Task>>();
+                return true;
+            }
+
+            var updated = new Func<CancellationToken, Task>[current.Length - 1];
+            Array.Copy(current, 0, updated, 0, index);
+            Array.Copy(current, index + 1, updated, index, current.Length - index - 1);
+            _flushCallbacks = updated;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Flushes all registered sink flush callbacks (see <see cref="RegisterFlush"/>).
+    /// </summary>
+    /// <param name="cancellationToken">Observed between callbacks and passed to each one.</param>
+    /// <returns>
+    /// A task that completes when every registered callback has completed. When no callback is
+    /// registered this returns <see cref="Task.CompletedTask"/> synchronously with zero allocation,
+    /// preserving the original no-op behaviour.
+    /// </returns>
+    /// <remarks>
+    /// Every callback is attempted even if an earlier one faults; any exceptions are surfaced
+    /// together as an <see cref="AggregateException"/> so a single bad sink never silently
+    /// swallows the rest of the flush.
+    /// </remarks>
     public static Task FlushAsync(CancellationToken cancellationToken = default)
     {
-        return Task.CompletedTask;
+        Func<CancellationToken, Task>[] callbacks = _flushCallbacks;
+        return callbacks.Length == 0 ? Task.CompletedTask : FlushAllAsync(callbacks, cancellationToken);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static async Task FlushAllAsync(Func<CancellationToken, Task>[] callbacks, CancellationToken cancellationToken)
+    {
+        List<Exception>? errors = null;
+        for (int i = 0; i < callbacks.Length; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                Task task = callbacks[i](cancellationToken);
+                if (task is not null)
+                {
+                    await task.ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                (errors ??= []).Add(ex);
+            }
+        }
+
+        if (errors is not null)
+        {
+            throw new AggregateException("One or more Nilog flush callbacks failed.", errors);
+        }
     }
 
     #endregion Extensibility Hooks (Async/Batch Ready)

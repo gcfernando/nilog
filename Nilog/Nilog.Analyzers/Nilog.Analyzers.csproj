@@ -14,13 +14,38 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
-    <IsPackable>false</IsPackable>
     <RootNamespace>Nilog.Analyzers</RootNamespace>
     <NoWarn>$(NoWarn);RS2008</NoWarn>
   </PropertyGroup>
 
+  <!-- ===== Ship as the opt-in `Nilog.Analyzers` NuGet package ===== -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Nilog.Analyzers</PackageId>
+    <Version>1.0.3</Version>
+    <Description>Opt-in Roslyn analyzers for Nilog: NILOG001 (interpolated message templates, with a code fix), NILOG002 (placeholder/argument count mismatch), NILOG003 (concatenated or string.Format templates), and NILOG004 (duplicate named placeholder). Catches the structured-logging footguns that silently defeat Nilog's zero-allocation template cache.</Description>
+    <PackageTags>roslyn;analyzer;logging;nilog;structured-logging;performance</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/gcfernando/Nilog</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/gcfernando/Nilog</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <!-- Analyzer packages ship the analyzer dll under analyzers/, not lib/, and must not
+         drag a runtime dependency into the consuming project. -->
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" PrivateAssets="all" />
+    <!-- Workspaces provides CodeFixProvider / Document for the NILOG001 code fix. PrivateAssets
+         keeps it out of the package's dependencies (the analyzer host already supplies it). -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.11.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- Pack the compiled analyzer into the Roslyn analyzer folder so it activates on install. -->
+  <ItemGroup>
+    <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
   </ItemGroup>
 
 </Project>

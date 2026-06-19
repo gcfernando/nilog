@@ -9,6 +9,101 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Nothing yet._
 
+## [1.0.3] - 2026-06-19
+
+### Added
+
+- **Typed six-, seven-, and eight-argument overloads** — a new build-time source generator
+  (`Nilog.SourceGenerators`) emits zero-array `WriteTrace`/`WriteDebug`/`WriteInformation`/
+  `WriteWarning`/`WriteError`/`WriteCritical` and `Nilogger.Log` overloads for 6–8 arguments,
+  lifting the typed ceiling from 5 to **8**. They are generated directly into `Nilog.dll`, so
+  consumers pick them up with no extra reference. The disabled path allocates **0 bytes** for
+  up to 8 typed arguments — asserted as exactly `0L` by
+  `HighArityTests.DisabledPath_SixTypedArgs_AllocatesZeroBytes` / `…EightTypedArgs…` and
+  confirmed by BenchmarkDotNet (8-arg disabled: **0.82 ns / 0 B** vs Microsoft 221 ns / 336 B).
+  6+ arguments previously fell back to `params object[]`; that boundary is now **9+**.
+
+- **Three new `Nilog.Analyzers` rules** (1 → 4 total):
+  - **NILOG002** — the `{Placeholder}` count in a constant template does not match the number
+    of arguments supplied.
+  - **NILOG003** — the template is built with string concatenation (`"a" + b`) or
+    `string.Format(...)`, which defeats the template cache and loses named properties.
+  - **NILOG004** — the same named `{Placeholder}` appears more than once (silently collides on
+    one structured-property key); numeric/positional `{0} {0}` reuse is intentionally allowed.
+
+- **Code fix for NILOG001** — a one-click "Convert to a literal template with arguments"
+  refactoring that rewrites `logger.WriteInformation($"User {id}")` into
+  `logger.WriteInformation("User {id}", id)`, preserving `:format`/`,alignment` clauses and
+  appending the extracted expressions at the correct trailing position for every call shape.
+
+- **`Nilog.Analyzers` now ships as a standalone NuGet package** (`analyzers/dotnet/cs`),
+  development-dependency only, so it never adds a runtime dependency to consumers.
+
+- **Real `FlushAsync`** via `Nilogger.RegisterFlush(Func<CancellationToken, Task>)` /
+  `UnregisterFlush(...)`. Buffering/batching sinks register how to drain themselves and
+  `FlushAsync` awaits them all (every callback is attempted; failures surface together as an
+  `AggregateException`). With nothing registered it stays a zero-allocation no-op, so existing
+  callers are unaffected — turning the long-standing "FlushAsync is a no-op" limitation into a
+  working flush.
+
+- **`LoggingEngineInteropTests`** — end-to-end tests that run Nilog through the real
+  `Microsoft.Extensions.Logging` `LoggerFactory` + `ILoggerProvider` pipeline (the exact
+  contract every third-party engine integrates through), asserting the rendered message,
+  `{OriginalFormat}`, named properties, exceptions, and level-filtering all survive intact.
+
+- **Allocation regression gate** — a consolidated `AllocationGateTests` suite (1–8 typed args
+  and the static `Log` path, all asserting `0L` on the disabled path) plus a GitHub Actions
+  workflow (`.github/workflows/ci.yml`) that builds Release and runs the tests on every push/PR.
+
+### Changed
+
+- **`TemplateFormatter.Render` now covers up to 8 arguments**, so the generated 6–8 arg
+  overloads render through the same stack-allocated `Span<char>` path as 1–5 args instead of
+  building an `object?[]` in `ToString()`. Enabled-path effect vs Microsoft: 6-arg
+  264 B → **192 B** (~27% less, ~44% faster) and 8-arg 336 B → **248 B** (~26% less, ~50%
+  faster). `Format(params object?[])` remains only as the format-specifier/overflow fallback.
+
+- **`Nilogger` is now a `partial` class** so the generated overloads compile into the same type.
+
+- **Native AOT / trimming is now compiler-enforced** via `<IsAotCompatible>true</IsAotCompatible>`
+  on `Nilog.Core`: the trim, single-file, and AOT analyzers run on every build and, with
+  `TreatWarningsAsErrors` in Release, fail the build on any unsafe construct. The Native AOT
+  compiler emits native code from `Nilog.dll` with zero warnings.
+
+- **`Nilog.Demo`, `Nilog.Function`, and `Nilog.Benchmark` updated** to exercise 6–8 typed args,
+  the 9-argument `params` escape hatch, real `FlushAsync`/`RegisterFlush`, and the four analyzer
+  rules. Package/product version bumped to **1.0.3**.
+
+### Fixed
+
+- **`Nilogger.Log` with 5–8 args silently allocated.** The typed `Log<T0..Tn>` overloads carried
+  `[OverloadResolutionPriority(-1)]`, which let the `params object[]` overload win for a normal
+  (no-exception) call — so the static `Log` API allocated an array, contradicting the documented
+  zero-array guarantee. Fixed by **promoting** the exception overload
+  (`Log(ILogger, LogLevel, string, Exception, params object[])` → priority 1) instead of demoting
+  the typed ones: a trailing `Exception` still binds correctly (regression-tested), while a plain
+  typed call now binds to the zero-array overload. Discovered by the new allocation gate.
+
+- **Trimming/AOT hazard removed.** Enabling the AOT analyzers surfaced two uses of
+  `Exception.TargetSite` (`[RequiresUnreferencedCode]`) in the exception formatter. The
+  `Target Site` line — redundant with the stack trace — was dropped, making the library
+  genuinely trim/AOT-clean. (The only behavioural change is one fewer line in the exception
+  report text.)
+
+### Performance
+
+Measured with BenchmarkDotNet (ShortRun: 3 warmup + 3 measurement, Server GC), .NET 10.0,
+Intel Core i7-13850HX:
+
+| Path | v1.0.2 | v1.0.3 | Δ |
+|------|--------|--------|---|
+| **8-arg disabled** — `WriteInformation("{A}…{H}", …)` | params, 221 ns / 336 B (≈ Microsoft) | **0.82 ns / 0 B** | **~268× faster, zero alloc** |
+| **6-arg enabled** — `WriteInformation("{A}…{F}", …)` | params, 180 ns / 264 B (≈ Microsoft) | **100.6 ns / 192 B** | **~44% faster, ~27% less alloc** |
+| **8-arg enabled** — `WriteInformation("{A}…{H}", …)` | params, 233 ns / 336 B (≈ Microsoft) | **117.0 ns / 248 B** | **~50% faster, ~26% less alloc** |
+| **Static `Nilogger.Log`, 5–8 typed args, disabled** | params array (allocated) | **0 B** | **bug fix — now zero-array** |
+
+The 0–5-arg paths are unchanged from v1.0.2 (already correct).
+
 ## [1.0.2] - 2026-06-16
 
 ### Added
@@ -286,7 +381,8 @@ see the README for full tables and methodology):
 - XML documentation on every public member, consistent file headers, and centralised analyzer
   suppressions for the deliberate hot-path trade-offs.
 
-[Unreleased]: https://github.com/gcfernando/Nilog/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/gcfernando/Nilog/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/gcfernando/Nilog/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/gcfernando/Nilog/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/gcfernando/Nilog/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/gcfernando/Nilog/releases/tag/v1.0.0

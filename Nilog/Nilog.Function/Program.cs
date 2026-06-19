@@ -17,6 +17,7 @@ using Nilog;
 using Nilog.Function.Logging;
 using Nilog.Function.Services;
 using OpenTelemetry;
+using OpenTelemetry.Trace;
 
 FunctionsApplicationBuilder builder = FunctionsApplication.CreateBuilder(args);
 
@@ -54,8 +55,22 @@ if (!string.IsNullOrWhiteSpace(appInsights))
 
 IHost app = builder.Build();
 
-// 5. Drain Nilog's async sink and stop its background timestamp timer on graceful
-//    shutdown, so buffered work is flushed and teardown is deterministic.
+// 5. Register how to drain telemetry so Nilogger.FlushAsync() actually flushes it (v1.0.3).
+//    A buffering/batching sink registers a callback; Nilog awaits it on flush. Here we force
+//    the OpenTelemetry trace pipeline to flush. With nothing registered FlushAsync is a no-op.
+TracerProvider? tracerProvider = app.Services.GetService<TracerProvider>();
+if (tracerProvider is not null)
+{
+    Nilogger.RegisterFlush(ct =>
+    {
+        _ = tracerProvider.ForceFlush();
+        return Task.CompletedTask;
+    });
+}
+
+// 6. Drain Nilog (which now awaits the registered telemetry flush) and stop its UTC
+//    timestamp refresh on graceful shutdown, so buffered work is flushed and teardown
+//    is deterministic.
 IHostApplicationLifetime lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
 lifetime.ApplicationStopping.Register(static () =>
 {

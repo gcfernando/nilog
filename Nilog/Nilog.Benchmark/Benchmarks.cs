@@ -187,14 +187,51 @@ public class FiveArgBenchmarks
 }
 
 // ---------------------------------------------------------------------------
-// 5c. PARAMS PATH (6+ args) — true open-ended escape hatch
+// 5c. SIX-TO-EIGHT ARG TYPED — source-generated zero-array path (NEW in v1.0.3)
 // ---------------------------------------------------------------------------
 
 /// <summary>
-/// Six arguments: beyond the typed overloads (extended to 5 in v1.0.2), so
+/// Six, seven, and eight arguments now bind to source-generated strongly-typed
+/// <c>WriteInformation&lt;T0..Tn&gt;</c> overloads (Nilog.SourceGenerators, new in v1.0.3) —
+/// no <c>object[]</c> on the disabled path, same struct-based state as the 1–5 arg paths.
+/// Microsoft still allocates the array on every call. The disabled rows must show 0 B.
+/// </summary>
+[MemoryDiagnoser]
+[CategoriesColumn]
+[GroupBenchmarksBy(BenchmarkLogicalGroupRule.ByCategory)]
+public class HighArityTypedBenchmarks
+{
+    private readonly BenchLogger _enabled = new(enabled: true);
+    private readonly BenchLogger _disabled = new(enabled: false);
+
+    [BenchmarkCategory("6 args"), Benchmark(Baseline = true, Description = "Microsoft (params)")]
+    public void MS_Six() => _enabled.LogInformation("{A} {B} {C} {D} {E} {F}", 1, 2, 3, 4, 5, 6);
+
+    [BenchmarkCategory("6 args"), Benchmark(Description = "Nilog (typed — zero array)")]
+    public void Nilog_Six() => _enabled.WriteInformation("{A} {B} {C} {D} {E} {F}", 1, 2, 3, 4, 5, 6);
+
+    [BenchmarkCategory("8 args"), Benchmark(Baseline = true, Description = "Microsoft (params)")]
+    public void MS_Eight() => _enabled.LogInformation("{A} {B} {C} {D} {E} {F} {G} {H}", 1, 2, 3, 4, 5, 6, 7, 8);
+
+    [BenchmarkCategory("8 args"), Benchmark(Description = "Nilog (typed — zero array)")]
+    public void Nilog_Eight() => _enabled.WriteInformation("{A} {B} {C} {D} {E} {F} {G} {H}", 1, 2, 3, 4, 5, 6, 7, 8);
+
+    [BenchmarkCategory("8 args disabled"), Benchmark(Baseline = true, Description = "Microsoft (params)")]
+    public void MS_Eight_Disabled() => _disabled.LogDebug("{A} {B} {C} {D} {E} {F} {G} {H}", 1, 2, 3, 4, 5, 6, 7, 8);
+
+    [BenchmarkCategory("8 args disabled"), Benchmark(Description = "Nilog (typed — 0 B expected)")]
+    public void Nilog_Eight_Disabled() => _disabled.WriteDebug("{A} {B} {C} {D} {E} {F} {G} {H}", 1, 2, 3, 4, 5, 6, 7, 8);
+}
+
+// ---------------------------------------------------------------------------
+// 5d. PARAMS PATH (9+ args) — the true open-ended escape hatch
+// ---------------------------------------------------------------------------
+
+/// <summary>
+/// Nine arguments: beyond the source-generated typed overloads (1–8), so
 /// <c>params object[]</c> runs on both sides. Nilog's <c>IsEnabled</c> guard still fires
 /// before the formatter runs, so the disabled path is still faster than Microsoft — but
-/// both allocate the array.
+/// both allocate the array here.
 /// </summary>
 [MemoryDiagnoser]
 [CategoriesColumn]
@@ -204,17 +241,17 @@ public class ParamsPathBenchmarks
     private readonly BenchLogger _enabled = new(enabled: true);
     private readonly BenchLogger _disabled = new(enabled: false);
 
-    [BenchmarkCategory("Enabled"), Benchmark(Baseline = true, Description = "Microsoft 6 args")]
-    public void Microsoft_Enabled() => _enabled.LogInformation("{A} {B} {C} {D} {E} {F}", 1, 2, 3, 4, 5, 6);
+    [BenchmarkCategory("Enabled"), Benchmark(Baseline = true, Description = "Microsoft 9 args")]
+    public void Microsoft_Enabled() => _enabled.LogInformation("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
 
-    [BenchmarkCategory("Enabled"), Benchmark(Description = "Nilog 6 args (params fallback)")]
-    public void Nilog_Enabled() => _enabled.WriteInformation("{A} {B} {C} {D} {E} {F}", 1, 2, 3, 4, 5, 6);
+    [BenchmarkCategory("Enabled"), Benchmark(Description = "Nilog 9 args (params fallback)")]
+    public void Nilog_Enabled() => _enabled.WriteInformation("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
 
-    [BenchmarkCategory("Disabled"), Benchmark(Baseline = true, Description = "Microsoft 6 args")]
-    public void Microsoft_Disabled() => _disabled.LogInformation("{A} {B} {C} {D} {E} {F}", 1, 2, 3, 4, 5, 6);
+    [BenchmarkCategory("Disabled"), Benchmark(Baseline = true, Description = "Microsoft 9 args")]
+    public void Microsoft_Disabled() => _disabled.LogInformation("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
 
-    [BenchmarkCategory("Disabled"), Benchmark(Description = "Nilog 6 args (params, IsEnabled guard)")]
-    public void Nilog_Disabled() => _disabled.WriteInformation("{A} {B} {C} {D} {E} {F}", 1, 2, 3, 4, 5, 6);
+    [BenchmarkCategory("Disabled"), Benchmark(Description = "Nilog 9 args (params, IsEnabled guard)")]
+    public void Nilog_Disabled() => _disabled.WriteInformation("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
 }
 
 // ---------------------------------------------------------------------------
@@ -269,11 +306,23 @@ public class DisabledAllArgsBenchmarks
     [BenchmarkCategory("5 args (typed)"), Benchmark(Description = "Nilog — 0 B expected")]
     public void Nilog_Five() => _nl.WriteDebug("{A} {B} {C} {D} {E}", 1, 2, 3, 4, 5);
 
-    [BenchmarkCategory("6 args (params)"), Benchmark(Baseline = true, Description = "Microsoft")]
+    [BenchmarkCategory("6 args (typed)"), Benchmark(Baseline = true, Description = "Microsoft")]
     public void MS_Six() => _ms.LogDebug("{A} {B} {C} {D} {E} {F}", 1, 2, 3, 4, 5, 6);
 
-    [BenchmarkCategory("6 args (params)"), Benchmark(Description = "Nilog")]
+    [BenchmarkCategory("6 args (typed)"), Benchmark(Description = "Nilog — 0 B expected")]
     public void Nilog_Six() => _nl.WriteDebug("{A} {B} {C} {D} {E} {F}", 1, 2, 3, 4, 5, 6);
+
+    [BenchmarkCategory("8 args (typed)"), Benchmark(Baseline = true, Description = "Microsoft")]
+    public void MS_Eight() => _ms.LogDebug("{A} {B} {C} {D} {E} {F} {G} {H}", 1, 2, 3, 4, 5, 6, 7, 8);
+
+    [BenchmarkCategory("8 args (typed)"), Benchmark(Description = "Nilog — 0 B expected")]
+    public void Nilog_Eight() => _nl.WriteDebug("{A} {B} {C} {D} {E} {F} {G} {H}", 1, 2, 3, 4, 5, 6, 7, 8);
+
+    [BenchmarkCategory("9 args (params)"), Benchmark(Baseline = true, Description = "Microsoft")]
+    public void MS_Nine() => _ms.LogDebug("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
+
+    [BenchmarkCategory("9 args (params)"), Benchmark(Description = "Nilog")]
+    public void Nilog_Nine() => _nl.WriteDebug("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
 }
 
 // ---------------------------------------------------------------------------
@@ -428,6 +477,14 @@ public class RuntimeLevelBenchmarks
     [BenchmarkCategory("Enabled"), Benchmark(Description = "Log 4 args (typed)")]
     public void Log_Four_Enabled() => Nilogger.Log(_enabled, LogLevel.Error, "{A} {B} {C} {D}", 1, 2, 3, 4);
 
+    // 5- and 8-arg static Log: proves the v1.0.3 overload-priority fix keeps these on the
+    // zero-array typed path (before v1.0.3 they silently bound to params object[]).
+    [BenchmarkCategory("Enabled"), Benchmark(Description = "Log 5 args (typed — fixed v1.0.3)")]
+    public void Log_Five_Enabled() => Nilogger.Log(_enabled, LogLevel.Error, "{A} {B} {C} {D} {E}", 1, 2, 3, 4, 5);
+
+    [BenchmarkCategory("Enabled"), Benchmark(Description = "Log 8 args (typed — fixed v1.0.3)")]
+    public void Log_Eight_Enabled() => Nilogger.Log(_enabled, LogLevel.Error, "{A} {B} {C} {D} {E} {F} {G} {H}", 1, 2, 3, 4, 5, 6, 7, 8);
+
     [BenchmarkCategory("Disabled"), Benchmark(Description = "Log 0 args")]
     public void Log_Zero_Disabled() => Nilogger.Log(_disabled, LogLevel.Information, "started");
 
@@ -439,6 +496,12 @@ public class RuntimeLevelBenchmarks
 
     [BenchmarkCategory("Disabled"), Benchmark(Description = "Log 4 args (typed — 0 B)")]
     public void Log_Four_Disabled() => Nilogger.Log(_disabled, LogLevel.Error, "{A} {B} {C} {D}", 1, 2, 3, 4);
+
+    [BenchmarkCategory("Disabled"), Benchmark(Description = "Log 5 args (typed — 0 B, fixed v1.0.3)")]
+    public void Log_Five_Disabled() => Nilogger.Log(_disabled, LogLevel.Error, "{A} {B} {C} {D} {E}", 1, 2, 3, 4, 5);
+
+    [BenchmarkCategory("Disabled"), Benchmark(Description = "Log 8 args (typed — 0 B, fixed v1.0.3)")]
+    public void Log_Eight_Disabled() => Nilogger.Log(_disabled, LogLevel.Error, "{A} {B} {C} {D} {E} {F} {G} {H}", 1, 2, 3, 4, 5, 6, 7, 8);
 }
 
 // ---------------------------------------------------------------------------
@@ -446,8 +509,9 @@ public class RuntimeLevelBenchmarks
 // ---------------------------------------------------------------------------
 
 /// <summary>
-/// FlushAsync is a true no-op: returns <see cref="Task.CompletedTask"/> synchronously.
-/// No async state machine, no allocation. Both variants are identical.
+/// FlushAsync with no registered callbacks stays a zero-allocation no-op: returns
+/// <see cref="Task.CompletedTask"/> synchronously. (When buffering sinks register via
+/// Nilogger.RegisterFlush, FlushAsync awaits them instead — not measured here.)
 /// </summary>
 [MemoryDiagnoser]
 public class FlushBenchmarks

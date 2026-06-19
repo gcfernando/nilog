@@ -4,6 +4,12 @@
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<AnalysisMode>all</AnalysisMode>
 
+		<!-- Cloud-native guarantee: enables the trim, single-file, and Native AOT analyzers at
+		     build time. Combined with TreatWarningsAsErrors (Release), any reflection or other
+		     AOT/trim-unsafe construct breaks the build instead of silently shipping. This is
+		     what makes Nilog safe for serverless cold-starts and trimmed container images. -->
+		<IsAotCompatible>true</IsAotCompatible>
+
 		<!-- Ship as `Nilog.dll` exposing the `Nilog` namespace so consumers write `using Nilog;` -->
 		<RootNamespace>Nilog</RootNamespace>
 		<AssemblyName>Nilog</AssemblyName>
@@ -11,7 +17,7 @@
 		<!-- ===== NuGet package ===== -->
 		<IsPackable>true</IsPackable>
 		<PackageId>Nilog</PackageId>
-		<Version>1.0.2</Version>
+		<Version>1.0.3</Version>
 		<Description>Zero-allocation, high-performance logging extensions for Microsoft.Extensions.Logging. Strongly-typed overloads that eliminate the params object[] allocation and allocate nothing when a level is disabled.</Description>
 		<PackageTags>logging;performance;high-performance;zero-allocation;ilogger;structured-logging;loggermessage</PackageTags>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -52,6 +58,16 @@
 
 	<ItemGroup Condition="'$(CI)' == 'true'">
 		<PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.300" PrivateAssets="All" />
+	</ItemGroup>
+
+	<!-- Build-time-only source generator that emits the 6-8 argument zero-array typed
+	     overloads directly into Nilog.dll. ReferenceOutputAssembly=false keeps the
+	     generator assembly out of the shipped package; consumers only see the generated,
+	     already-compiled overloads. -->
+	<ItemGroup>
+		<ProjectReference Include="..\Nilog.SourceGenerators\Nilog.SourceGenerators.csproj"
+		                  OutputItemType="Analyzer"
+		                  ReferenceOutputAssembly="false" />
 	</ItemGroup>
 
 </Project>

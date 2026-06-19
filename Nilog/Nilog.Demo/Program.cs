@@ -53,8 +53,10 @@ ILogger reports = factory.CreateLogger("Checkout.Reports");
 //                                                             //    cache and loses
 //                                                             //    structured properties
 //     logger.WriteInformation("User {UserId} signed in", userId); // ✅ do this instead
-// Add the `Nilog.Analyzers` package to a project and the first form raises NILOG001
-// at compile time, so this mistake never reaches code review.
+// Add the `Nilog.Analyzers` package and the first form raises NILOG001 at compile time
+// (with a one-click "convert to template + args" fix). The analyzer also flags
+// NILOG002 (placeholder/argument count mismatch), NILOG003 (concatenated/string.Format
+// templates), and NILOG004 (a duplicate {Name}), so these mistakes never reach review.
 // -----------------------------------------------------------------------------
 
 // A realistic order we will follow through the whole tour.
@@ -98,15 +100,31 @@ Section("2. Structured logging with typed arguments (1–5, zero array allocatio
         shipmentId, "DHL", "Berlin", "DE", new DateOnly(2026, 6, 16));
 }
 
-Section("3. More than five values — the familiar params path");
+Section("3. Six to eight values — still zero-array typed (NEW in v1.0.3)");
 {
-    // Six+ arguments transparently use the params object[] overload (one array,
-    // exactly like the framework). Handy when an event genuinely has many fields —
-    // but prefer splitting into a scope (Section 8) plus ≤ 5 inline values where you can.
+    // Six, seven, and eight arguments now bind to source-generated strongly-typed
+    // overloads (Nilog.SourceGenerators) — no object[] is built and nothing at all is
+    // allocated on the disabled path, exactly like the hand-written 1–5 arg overloads.
+    // Before v1.0.3 these fell back to params object[].
     var shipmentId = Guid.Parse("2b3c4d5e-6f70-4182-99aa-bbccddeeff00");
     shipping.WriteInformation(
         "Shipment {ShipmentId} via {Carrier} ({Service}) to {City}, {Country} — ETA {Eta:yyyy-MM-dd}",
-        shipmentId, "DHL", "Express", "Berlin", "DE", new DateOnly(2026, 6, 16));
+        shipmentId, "DHL", "Express", "Berlin", "DE", new DateOnly(2026, 6, 16)); // 6 args, typed
+
+    shipping.WriteInformation(
+        "Shipment {ShipmentId} {Carrier} {Service} {City} {Country} {Eta} weight {Kg:N1}kg",
+        shipmentId, "DHL", "Express", "Berlin", "DE", new DateOnly(2026, 6, 16), 2.4); // 7 args, typed
+}
+
+Section("3b. Nine or more values — the familiar params path");
+{
+    // Nine+ arguments transparently use the params object[] overload (one array, exactly
+    // like the framework). Handy when an event genuinely has many fields — but prefer a
+    // scope (Section 8) plus ≤ 8 inline values where you can.
+    var shipmentId = Guid.Parse("3c4d5e6f-7081-4293-aabb-ccddeeff0011");
+    shipping.WriteInformation(
+        "Shipment {ShipmentId} {Carrier} {Service} {City} {Country} {Eta} {Kg} {Zone} {Priority}",
+        shipmentId, "DHL", "Express", "Berlin", "DE", new DateOnly(2026, 6, 16), 2.4, "EU", "P1");
 }
 
 Section("4. Runtime log level — Nilogger.Log when severity is decided in code");
@@ -275,8 +293,22 @@ Section("10. Async / batching hooks for a custom sink");
     startup.WriteInformation("AsyncSinkFilter keeps Error?       {Keep}",
         Nilogger.AsyncSinkFilter(LogLevel.Error, "", null!));
 
+    // Real FlushAsync (v1.0.3): a buffering/batching sink registers how to drain itself, and
+    // Nilogger.FlushAsync() awaits every registered sink. With nothing registered it stays a
+    // zero-allocation no-op. Here a fake batching sink shows the wiring.
+    int pendingBatched = 3;
+    Func<CancellationToken, Task> drainBatch = async _ =>
+    {
+        await Task.Yield();             // pretend to ship the batch off-box
+        pendingBatched = 0;
+    };
+    Nilogger.RegisterFlush(drainBatch);
+
     // Await a flush during graceful shutdown so buffered work is drained.
     await Nilogger.FlushAsync();
+    startup.WriteInformation("Flushed batching sink — pending entries now {Pending}", pendingBatched);
+
+    Nilogger.UnregisterFlush(drainBatch); // tidy up the demo's global registration
 }
 
 Section("11. Template niceties — alignment, format, and literal braces in a report");
