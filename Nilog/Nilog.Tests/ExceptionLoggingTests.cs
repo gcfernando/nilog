@@ -35,9 +35,9 @@ public class ExceptionLoggingTests
 
         string msg = logger.Single.Message;
         Assert.Equal(LogLevel.Error, logger.Single.Level);
-        Assert.Contains("Timestamp", msg);
-        Assert.Contains("Title          : System Error", msg);
-        Assert.Contains("Exception Type : System.InvalidOperationException", msg);
+        // Basic report uses compact single-line format: "[Title] Type: Message (Source=..., HResult=...)"
+        Assert.Contains("[System Error]", msg);
+        Assert.Contains("System.InvalidOperationException", msg);
         Assert.Contains("something failed", msg);
         Assert.Contains("HResult", msg);
     }
@@ -51,7 +51,7 @@ public class ExceptionLoggingTests
         logger.WriteCriticalException(ex);
 
         Assert.Equal(LogLevel.Critical, logger.Single.Level);
-        Assert.Contains("Title          : Critical System Error", logger.Single.Message);
+        Assert.Contains("[Critical System Error]", logger.Single.Message);
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public class ExceptionLoggingTests
 
         logger.WriteErrorException(Thrown("x"), title: "Payment Failure");
 
-        Assert.Contains("Title          : Payment Failure", logger.Single.Message);
+        Assert.Contains("[Payment Failure]", logger.Single.Message);
     }
 
     [Fact]
@@ -150,6 +150,35 @@ public class ExceptionLoggingTests
     }
 
     [Fact]
+    public void ErrorException_BasicReport_IsCompactSingleLine()
+    {
+        TestLogger logger = new();
+        Exception ex = Thrown("disk full");
+
+        logger.WriteErrorException(ex, title: "IO Error", moreDetailsEnabled: false);
+
+        string msg = logger.Single.Message;
+        Assert.StartsWith("[IO Error]", msg);
+        Assert.DoesNotContain("\n", msg);
+        Assert.DoesNotContain("Timestamp", msg);
+    }
+
+    [Fact]
+    public void ErrorException_DetailedReport_IsVerboseMultiLine()
+    {
+        TestLogger logger = new();
+        Exception ex = Thrown("disk full");
+
+        logger.WriteErrorException(ex, title: "IO Error", moreDetailsEnabled: true);
+
+        string msg = logger.Single.Message;
+        Assert.Contains("Timestamp      :", msg);
+        Assert.Contains("Title          : IO Error", msg);
+        Assert.Contains("Exception Type : System.InvalidOperationException", msg);
+        Assert.Contains("Stack Trace", msg);
+    }
+
+    [Fact]
     public void ErrorException_WhenDisabled_DoesNothing()
     {
         TestLogger logger = new()
@@ -180,6 +209,6 @@ public class ExceptionLoggingTests
 
         TestLogger logger2 = new();
         logger2.WriteErrorException(Thrown("again"));
-        Assert.Contains("Exception Type", logger2.Single.Message);
+        Assert.Contains("System.InvalidOperationException", logger2.Single.Message);
     }
 }

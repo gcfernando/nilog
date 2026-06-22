@@ -56,4 +56,47 @@ public class AllocationGateTests
         TestLogger logger = new() { MinLevel = LogLevel.Critical };
         Assert.Equal(0L, Measure(() => logger.WriteError("Failed {Id} on {Host}", 7, "node-1")));
     }
+
+    [Fact]
+    public void DisabledPath_NineTypedArgs_AllocatesZeroBytes()
+    {
+        TestLogger logger = new() { MinLevel = LogLevel.Warning };
+        Assert.Equal(0L, Measure(() => logger.WriteDebug("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9)));
+    }
+
+    [Fact]
+    public void ExceptionBasicReport_AllocatesBelow300Bytes()
+    {
+        Exception ex;
+        try { throw new InvalidOperationException("disk full"); } catch (Exception e) { ex = e; }
+
+        // Use a capturing logger that does not allocate on Log itself.
+        var logger = new CaptureLogger();
+
+        // JIT warmup.
+        for (int i = 0; i < 50; i++)
+            logger.WriteErrorException(ex, "System Error", moreDetailsEnabled: false);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        logger.WriteErrorException(ex, "System Error", moreDetailsEnabled: false);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.True(allocated < 300, $"Basic exception report allocated {allocated} B (target < 300 B)");
+    }
+
+    // Minimal logger that stores the last rendered message without heap-allocating during Log.
+    private sealed class CaptureLogger : Microsoft.Extensions.Logging.ILogger
+    {
+        public string? LastMessage;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel l) => true;
+        public IDisposable BeginScope<T>(T s) where T : notnull => Scope.Instance;
+        public void Log<T>(Microsoft.Extensions.Logging.LogLevel l, Microsoft.Extensions.Logging.EventId id, T state, Exception? ex, Func<T, Exception?, string> f)
+            => LastMessage = f(state, ex);
+
+        private sealed class Scope : IDisposable
+        {
+            public static readonly Scope Instance = new();
+            public void Dispose() { }
+        }
+    }
 }

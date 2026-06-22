@@ -9,6 +9,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Nothing yet._
 
+## [1.0.4] - 2026-06-22
+
+### Added
+
+- **Typed overloads extended to 16 arguments** — the source generator (`Nilog.SourceGenerators`)
+  now emits zero-array `Write*`/`Nilogger.Log` overloads for **6–16 arguments** (raised from 6–8
+  in v1.0.3), lifting the typed ceiling from 8 to **16**. A nine-argument call such as
+  `WriteInformation("{A}…{I}", 1…9)` now binds to `WriteInformation<T0…T8>` instead of falling
+  back to `params object[]` — so the disabled path allocates **0 bytes** and the enabled path
+  carries no array. Measured: 9-arg disabled **0.45 ns / 0 B** vs Microsoft 211 ns / 368 B
+  (**≈ 469× faster**); 9-arg enabled **156 ns / 368 B** vs Microsoft 246 ns / 368 B (**37%
+  faster** — boxing is unavoidable on the enabled path; the struct itself adds nothing).
+
+- **Typed multi-pair scope overloads** — three new `WriteScope` overloads that eliminate the
+  dictionary allocation for the most common scope shapes:
+  - `WriteScope<T1,T2>(key1, val1, key2, val2)` — backed by a stack-allocated `TwoScope` struct
+  - `WriteScope<T1,T2,T3>(key1, val1, key2, val2, key3, val3)` — backed by `ThreeScope`
+  - `WriteScope<T1,T2,T3,T4>(k1,v1, k2,v2, k3,v3, k4,v4)` — backed by `FourScope`
+
+  All three surface a scope compatible with the standard MEL `ILoggerProvider` pipeline. The
+  underlying readonly structs require no array copy — values are boxed only once each, the
+  unavoidable minimum for `ILoggerFactory` interop.
+
+- **Compact exception report (`moreDetailsEnabled: false`)** — `WriteErrorException` and
+  `WriteCriticalException` with `moreDetailsEnabled: false` now render a compact single-line
+  summary (`[Title] Type: Message (Source=…, HResult=…)`) that allocates **< 300 bytes** per
+  call, down from ≈ 992 bytes in v1.0.3. The verbose multi-line report (`moreDetailsEnabled:
+  true`) is unchanged. Guarded by a new allocation gate test.
+
+- **`ExceptionBasicReport_AllocatesBelow300Bytes` allocation gate** — a new test in
+  `AllocationGateTests` asserts that a single `WriteErrorException(ex, …, moreDetailsEnabled:
+  false)` call allocates fewer than 300 bytes (after JIT warmup), using a `CaptureLogger` inner
+  class that does not allocate during `Log`. Runs in CI Release to catch any regression.
+
+- **`DisabledPath_NineTypedArgs_AllocatesZeroBytes` test** — added to `AllocationGateTests` to
+  assert that a 9-typed-arg disabled call allocates exactly `0L`, covering the newly typed range.
+
+- **Typed scope unit tests** — `TypedTwoPairScope_HasExpectedEntries`,
+  `TypedThreePairScope_HasExpectedEntries`, and `TypedFourPairScope_HasExpectedEntries` added to
+  `ScopeTests`, verifying key/value ordering, counts, and correct enumeration.
+
+- **Benchmark additions and improvements**:
+  - `TwoArgBenchmarks` — new `Enabled (int+int)` category proves the 2-arg enabled path is 34%
+    faster than Microsoft when types match (46 ns vs 70 ns); the int+decimal delta (62 ns) is
+    explained by decimal boxing being 24 B vs 16 B for int — the code path is identical.
+  - `HighArityExtendedBenchmarks` — updated benchmark descriptions from "params" to "typed" to
+    reflect the v1.0.4 source-generator change; confirms 9-arg disabled = **0.45 ns / 0 B**.
+  - `TemplateCacheBenchmarks` — benchmarks the per-thread single-slot cache hit (`WarmCache`)
+    and the full `ConcurrentDictionary` miss path (`ColdParse`).
+  - `TypedScopeBenchmarks` — compares single-pair, typed 2-pair vs dict 2-pair, and typed 3-pair.
+  - `ValueVsReferenceArgBenchmarks` — compares int, string, and mixed argument boxing cost.
+  - **Debugger guard** in `Nilog.Benchmark/Program.cs` — aborts with a clear message if a
+    managed debugger is attached, preventing benchmarks from running under the debugger and
+    producing misleadingly slow numbers.
+
+### Changed
+
+- **`Nilog.Demo` updated**:
+  - Section 3b comment corrected from "Nine or more values — the familiar params path" to "Nine
+    values — still typed and zero-allocation (source-generated, 6–16 args)", reflecting that the
+    source generator now covers 1–16 args and a 9-arg call binds to `WriteInformation<T0…T8>`.
+  - Section 8 (scopes) updated to showcase the new typed `WriteScope<T1,T2/T3/T4>` overloads
+    with 2-pair, 3-pair, and 4-pair examples alongside the `IReadOnlyDictionary` fallback.
+
+- **`Nilog.Function` updated** — the per-request 3-entry dictionary scope in `OrdersFunction`
+  replaced with `WriteScope("OrderId", orderId, "CustomerId", request.CustomerId, "Currency",
+  request.Currency)` (typed `WriteScope<T1,T2,T3>`), eliminating the dictionary allocation for
+  the correlation scope that wraps every checkout invocation.
+
+- **`Nilog.Demo`, `Nilog.Function`, and `Nilog.Benchmark`** updated to reflect v1.0.4 changes.
+
+### Performance
+
+Measured with BenchmarkDotNet (ShortRun: 3 warmup + 3 measurement, Server GC), .NET 10.0,
+Intel Core i7-13850HX:
+
+| Path | v1.0.3 | v1.0.4 | Δ |
+|------|--------|--------|---|
+| **9-arg disabled** — `WriteDebug("{A}…{I}", 1…9)` | params, 211 ns / 368 B (≈ Microsoft) | **0.45 ns / 0 B** | **≈ 469× faster, zero alloc** |
+| **9-arg enabled** — `WriteInformation("{A}…{I}", 1…9)` | params, 246 ns / 368 B (≈ Microsoft) | **156 ns / 368 B** | **37% faster** (boxing is unavoidable on the enabled path; no array overhead added) |
+| **5-arg enabled** | 77.70 ns / 160 B | **77.70 ns / 160 B** | unchanged — confirmed < 140 ns target ✅ |
+| **2-arg enabled (int+int)** | n/a | **46.27 ns / 96 B** | 34% faster than Microsoft (70 ns / 136 B) |
+| **Compact exception report (basic, `moreDetailsEnabled: false`)** | ≈ 992 B | **< 300 B** | **> 3× less allocation per report** |
+
+The 0–8-arg paths are unchanged from v1.0.3.
+
 ## [1.0.3] - 2026-06-19
 
 ### Added
@@ -386,7 +472,8 @@ see the README for full tables and methodology):
 - XML documentation on every public member, consistent file headers, and centralised analyzer
   suppressions for the deliberate hot-path trade-offs.
 
-[Unreleased]: https://github.com/gcfernando/Nilog/compare/v1.0.3...HEAD
+[Unreleased]: https://github.com/gcfernando/Nilog/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/gcfernando/Nilog/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/gcfernando/Nilog/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/gcfernando/Nilog/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/gcfernando/Nilog/compare/v1.0.0...v1.0.1

@@ -22,7 +22,7 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>Nilog.Analyzers</PackageId>
-    <Version>1.0.3</Version>
+    <Version>1.0.4</Version>
     <Description>Opt-in Roslyn analyzers for Nilog (8 rules + a code fix, parity with SerilogAnalyzer): NILOG001 interpolated templates (with a code fix), NILOG002 placeholder/argument count mismatch, NILOG003 concatenated or string.Format templates, NILOG004 duplicate placeholder, NILOG005 positional placeholders, NILOG006 exception passed as a value, NILOG007 malformed template, NILOG008 non-PascalCase placeholder. Catches the structured-logging footguns that silently defeat Nilog's zero-allocation template cache.</Description>
     <PackageTags>roslyn;analyzer;logging;nilog;structured-logging;performance</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

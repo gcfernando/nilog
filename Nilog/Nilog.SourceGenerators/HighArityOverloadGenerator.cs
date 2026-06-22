@@ -24,7 +24,7 @@ public sealed class HighArityOverloadGenerator : IIncrementalGenerator
 {
     // The hand-written overloads cover 1-5 arguments; the generator picks up from 6.
     private const int FirstArity = 6;
-    private const int LastArity = 8;
+    private const int LastArity = 16;
 
     private static readonly (string Method, string Level)[] NoExceptionLevels =
     {
@@ -150,8 +150,13 @@ public sealed class HighArityOverloadGenerator : IIncrementalGenerator
         // Render through the shared stack-allocated span path (TemplateFormatter.Render
         // supports up to 8 args) so the enabled path renders without allocating an object?[];
         // only format-specifier/overflow templates fall back to string.Format internally.
+        // For n >= 9, TemplateFormatter.Render does not have an overload, so fall back to
+        // the array-based Format path instead.
         string rendered = string.Join(", ", Enumerable(n, i => $"_v{i}!"));
-        sb.AppendLine($"        public override string ToString() => _fmt.Render({n}, {rendered});");
+        if (n <= 8)
+            sb.AppendLine($"        public override string ToString() => _fmt.Render({n}, {rendered});");
+        else
+            sb.AppendLine($"        public override string ToString() => _fmt.Format(new object?[] {{ {rendered} }});");
         sb.AppendLine();
         sb.AppendLine("        public struct Enumerator : IEnumerator<KeyValuePair<string, object>>");
         sb.AppendLine("        {");

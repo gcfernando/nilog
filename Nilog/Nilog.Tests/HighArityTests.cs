@@ -147,4 +147,40 @@ public class HighArityTests
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Assert.Equal(0L, allocated);
     }
+
+    [Fact]
+    public void WriteInformation_NineArgs_RendersAndCarriesStructuredProps()
+    {
+        TestLogger logger = new();
+        logger.WriteInformation("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
+        Assert.Equal("1 2 3 4 5 6 7 8 9", logger.Single.Message);
+        Assert.Equal(1, logger.Single["A"]);
+        Assert.Equal(9, logger.Single["I"]);
+        Assert.Equal("{A} {B} {C} {D} {E} {F} {G} {H} {I}", logger.Single["{OriginalFormat}"]);
+    }
+
+    [Fact]
+    public void Log_NineTypedArgs_WhenDisabled_DoesNothing()
+    {
+        TestLogger logger = new() { MinLevel = LogLevel.Warning };
+        Nilogger.Log(logger, LogLevel.Debug, "{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
+        Assert.Empty(logger.Entries);
+    }
+
+    [Fact]
+    public void DisabledPath_NineTypedArgs_AllocatesZeroBytes()
+    {
+        TestLogger logger = new() { MinLevel = LogLevel.Warning };
+
+        for (int i = 0; i < 50; i++)
+            logger.WriteDebug("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+
+        for (int i = 0; i < 10_000; i++)
+            logger.WriteDebug("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
+
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.Equal(0L, allocated);
+    }
 }

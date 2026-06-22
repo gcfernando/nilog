@@ -2392,42 +2392,55 @@ public static partial class Nilogger
         LogNoArgs(logger, LogLevel.Critical, msg, ex);
     }
 
-    // The default exception renderer. It produces a fixed, aligned block of fields and,
-    // when asked, appends the stack trace and a bounded walk of inner exceptions. The
-    // StringBuilder comes from the pool so repeated calls don't churn the heap.
+    // The default exception renderer.
+    //
+    // Basic path (moreDetailsEnabled=false): compact single-line format. No StringBuilder
+    // needed — just one string allocation targeting < 300 B for typical exceptions.
+    //
+    // Detailed path (moreDetailsEnabled=true): verbose multi-line block that includes
+    // timestamp, stack trace, and inner exceptions. Uses the pooled StringBuilder and is
+    // intentionally the cold/expensive path — document callers accordingly.
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static string FormatExceptionMessageInternal(Exception ex, string title, bool moreDetailsEnabled)
     {
+        Type exType = ex.GetType();
+
+        if (!moreDetailsEnabled)
+        {
+            // Compact single-line format for the hot-path basic report.
+            // Typical output: "[System Error] System.InvalidOperationException: msg (Source=N/A, HResult=-2147467261)"
+            // ~80-120 chars = ~190-264 B — well under the 300 B target.
+            string typeName = exType.FullName ?? exType.Name;
+            string message = ex.Message?.Trim() ?? "N/A";
+            string source = ex.Source ?? "N/A";
+            return $"[{title ?? "N/A"}] {typeName}: {message} (Source={source}, HResult={ex.HResult})";
+        }
+
+        // Verbose multi-line format for detailed cold-path reporting.
+        // Note: Exception.TargetSite is deliberately omitted — it is annotated
+        // [RequiresUnreferencedCode] (trim/AOT-unsafe) and is redundant with the stack trace.
         StringBuilder sb = _sbPool.Get();
         try
         {
             _ = sb.Clear();
             _ = sb.EnsureCapacity(1024);
-
-            Type exType = ex.GetType();
             _ = sb.Append("Timestamp      : ").AppendLine(GetCachedUtc())
                 .Append("Title          : ").AppendLine(title ?? "N/A")
                 .Append("Exception Type : ").AppendLine(exType.FullName ?? exType.Name)
                 .Append("Message        : ").AppendLine(ex.Message?.Trim() ?? "N/A")
                 .Append("HResult        : ").Append(ex.HResult).AppendLine()
                 .Append("Source         : ").AppendLine(ex.Source ?? "N/A");
-            // Note: Exception.TargetSite is deliberately not reported - it is annotated
-            // [RequiresUnreferencedCode] (trim/AOT-unsafe) and is redundant with the stack
-            // trace below. Omitting it keeps Nilog fully Native-AOT and trimming compatible.
 
-            if (moreDetailsEnabled)
+            string? st = ex.StackTrace;
+            if (!string.IsNullOrWhiteSpace(st))
             {
-                string? st = ex.StackTrace;
-                if (!string.IsNullOrWhiteSpace(st))
-                {
-                    _ = sb.AppendLine().AppendLine("Stack Trace    :").AppendLine(st.Trim());
-                }
+                _ = sb.AppendLine().AppendLine("Stack Trace    :").AppendLine(st.Trim());
+            }
 
-                if (ex.InnerException is not null)
-                {
-                    _ = sb.AppendLine().AppendLine("---- Inner Exceptions ----");
-                    AppendInnerExceptionDetails(sb, ex.InnerException, 1, maxDepth: 3);
-                }
+            if (ex.InnerException is not null)
+            {
+                _ = sb.AppendLine().AppendLine("---- Inner Exceptions ----");
+                AppendInnerExceptionDetails(sb, ex.InnerException, 1, maxDepth: 3);
             }
 
             return sb.ToString();
@@ -2511,6 +2524,57 @@ public static partial class Nilogger
         }
 
         SingleScope scope = new(key, value);
+        return logger.BeginScope(scope) ?? new DisposableScope(scope);
+    }
+
+    /// <summary>
+    /// Begins a logging scope carrying two key/value pairs without allocating a dictionary or array.
+    /// </summary>
+    /// <typeparam name="T1">The type of the first value.</typeparam>
+    /// <typeparam name="T2">The type of the second value.</typeparam>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    public static IDisposable WriteScope<T1, T2>(this ILogger logger, string key1, T1 val1, string key2, T2 val2)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        if (string.IsNullOrWhiteSpace(key1)) throw new ArgumentException("Key cannot be null or whitespace.", nameof(key1));
+        if (string.IsNullOrWhiteSpace(key2)) throw new ArgumentException("Key cannot be null or whitespace.", nameof(key2));
+        TwoScope scope = new(key1, val1, key2, val2);
+        return logger.BeginScope(scope) ?? new DisposableScope(scope);
+    }
+
+    /// <summary>
+    /// Begins a logging scope carrying three key/value pairs without allocating a dictionary or array.
+    /// </summary>
+    /// <typeparam name="T1">The type of the first value.</typeparam>
+    /// <typeparam name="T2">The type of the second value.</typeparam>
+    /// <typeparam name="T3">The type of the third value.</typeparam>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    public static IDisposable WriteScope<T1, T2, T3>(this ILogger logger, string key1, T1 val1, string key2, T2 val2, string key3, T3 val3)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        if (string.IsNullOrWhiteSpace(key1)) throw new ArgumentException("Key cannot be null or whitespace.", nameof(key1));
+        if (string.IsNullOrWhiteSpace(key2)) throw new ArgumentException("Key cannot be null or whitespace.", nameof(key2));
+        if (string.IsNullOrWhiteSpace(key3)) throw new ArgumentException("Key cannot be null or whitespace.", nameof(key3));
+        ThreeScope scope = new(key1, val1, key2, val2, key3, val3);
+        return logger.BeginScope(scope) ?? new DisposableScope(scope);
+    }
+
+    /// <summary>
+    /// Begins a logging scope carrying four key/value pairs without allocating a dictionary or array.
+    /// </summary>
+    /// <typeparam name="T1">The type of the first value.</typeparam>
+    /// <typeparam name="T2">The type of the second value.</typeparam>
+    /// <typeparam name="T3">The type of the third value.</typeparam>
+    /// <typeparam name="T4">The type of the fourth value.</typeparam>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    public static IDisposable WriteScope<T1, T2, T3, T4>(this ILogger logger, string key1, T1 val1, string key2, T2 val2, string key3, T3 val3, string key4, T4 val4)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        if (string.IsNullOrWhiteSpace(key1)) throw new ArgumentException("Key cannot be null or whitespace.", nameof(key1));
+        if (string.IsNullOrWhiteSpace(key2)) throw new ArgumentException("Key cannot be null or whitespace.", nameof(key2));
+        if (string.IsNullOrWhiteSpace(key3)) throw new ArgumentException("Key cannot be null or whitespace.", nameof(key3));
+        if (string.IsNullOrWhiteSpace(key4)) throw new ArgumentException("Key cannot be null or whitespace.", nameof(key4));
+        FourScope scope = new(key1, val1, key2, val2, key3, val3, key4, val4);
         return logger.BeginScope(scope) ?? new DisposableScope(scope);
     }
 
@@ -2721,6 +2785,160 @@ public static partial class Nilogger
             [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
             public readonly void Dispose()
             { }
+        }
+    }
+
+    // Two-pair scope state. Struct: lives on the stack, boxed once inside BeginScope.
+    // Avoids array allocation and dictionary copy overhead versus the SmallScopeWrapper path.
+    private readonly struct TwoScope : IReadOnlyList<KeyValuePair<string, object>>
+    {
+        private readonly KeyValuePair<string, object> _p0, _p1;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+        public TwoScope(string k0, object? v0, string k1, object? v1)
+        {
+            _p0 = new(k0, v0 ?? "N/A");
+            _p1 = new(k1, v1 ?? "N/A");
+        }
+
+        public int Count => 2;
+
+        public KeyValuePair<string, object> this[int index] => index switch
+        {
+            0 => _p0,
+            1 => _p1,
+            _ => throw new ArgumentOutOfRangeException(nameof(index))
+        };
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+        public Enumerator GetEnumerator() => new(this);
+
+        IEnumerator<KeyValuePair<string, object>> IEnumerable<KeyValuePair<string, object>>.GetEnumerator()
+            => GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+        public override string ToString() => $"{_p0.Key}={_p0.Value} {_p1.Key}={_p1.Value}";
+
+        public struct Enumerator : IEnumerator<KeyValuePair<string, object>>
+        {
+            private readonly TwoScope _state;
+            private int _index;
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            internal Enumerator(TwoScope state) { _state = state; _index = -1; }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public bool MoveNext() { _index++; return _index < 2; }
+
+            public readonly KeyValuePair<string, object> Current => _state[_index];
+            readonly object IEnumerator.Current => _state[_index];
+
+            public void Reset() { _index = -1; }
+            public readonly void Dispose() { }
+        }
+    }
+
+    // Three-pair scope state.
+    private readonly struct ThreeScope : IReadOnlyList<KeyValuePair<string, object>>
+    {
+        private readonly KeyValuePair<string, object> _p0, _p1, _p2;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+        public ThreeScope(string k0, object? v0, string k1, object? v1, string k2, object? v2)
+        {
+            _p0 = new(k0, v0 ?? "N/A");
+            _p1 = new(k1, v1 ?? "N/A");
+            _p2 = new(k2, v2 ?? "N/A");
+        }
+
+        public int Count => 3;
+
+        public KeyValuePair<string, object> this[int index] => index switch
+        {
+            0 => _p0, 1 => _p1, 2 => _p2,
+            _ => throw new ArgumentOutOfRangeException(nameof(index))
+        };
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+        public Enumerator GetEnumerator() => new(this);
+
+        IEnumerator<KeyValuePair<string, object>> IEnumerable<KeyValuePair<string, object>>.GetEnumerator()
+            => GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+        public override string ToString() =>
+            $"{_p0.Key}={_p0.Value} {_p1.Key}={_p1.Value} {_p2.Key}={_p2.Value}";
+
+        public struct Enumerator : IEnumerator<KeyValuePair<string, object>>
+        {
+            private readonly ThreeScope _state;
+            private int _index;
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            internal Enumerator(ThreeScope state) { _state = state; _index = -1; }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public bool MoveNext() { _index++; return _index < 3; }
+
+            public readonly KeyValuePair<string, object> Current => _state[_index];
+            readonly object IEnumerator.Current => _state[_index];
+
+            public void Reset() { _index = -1; }
+            public readonly void Dispose() { }
+        }
+    }
+
+    // Four-pair scope state (matches SmallScopeWrapper's maximum entry count).
+    private readonly struct FourScope : IReadOnlyList<KeyValuePair<string, object>>
+    {
+        private readonly KeyValuePair<string, object> _p0, _p1, _p2, _p3;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+        public FourScope(string k0, object? v0, string k1, object? v1, string k2, object? v2, string k3, object? v3)
+        {
+            _p0 = new(k0, v0 ?? "N/A");
+            _p1 = new(k1, v1 ?? "N/A");
+            _p2 = new(k2, v2 ?? "N/A");
+            _p3 = new(k3, v3 ?? "N/A");
+        }
+
+        public int Count => 4;
+
+        public KeyValuePair<string, object> this[int index] => index switch
+        {
+            0 => _p0, 1 => _p1, 2 => _p2, 3 => _p3,
+            _ => throw new ArgumentOutOfRangeException(nameof(index))
+        };
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+        public Enumerator GetEnumerator() => new(this);
+
+        IEnumerator<KeyValuePair<string, object>> IEnumerable<KeyValuePair<string, object>>.GetEnumerator()
+            => GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+        public override string ToString() =>
+            $"{_p0.Key}={_p0.Value} {_p1.Key}={_p1.Value} {_p2.Key}={_p2.Value} {_p3.Key}={_p3.Value}";
+
+        public struct Enumerator : IEnumerator<KeyValuePair<string, object>>
+        {
+            private readonly FourScope _state;
+            private int _index;
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            internal Enumerator(FourScope state) { _state = state; _index = -1; }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public bool MoveNext() { _index++; return _index < 4; }
+
+            public readonly KeyValuePair<string, object> Current => _state[_index];
+            readonly object IEnumerator.Current => _state[_index];
+
+            public void Reset() { _index = -1; }
+            public readonly void Dispose() { }
         }
     }
 

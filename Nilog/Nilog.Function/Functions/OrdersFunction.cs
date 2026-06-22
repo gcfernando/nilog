@@ -60,14 +60,9 @@ public sealed class OrdersFunction(
 
         var orderId = Guid.NewGuid();
 
-        // A nested, request-scoped context bag. These fields are merged with the
-        // middleware's scope, so every line below is tagged with all of them.
-        using (_logger.WriteScope(new Dictionary<string, object>
-        {
-            ["OrderId"] = orderId,
-            ["CustomerId"] = request.CustomerId,
-            ["Currency"] = request.Currency,
-        }))
+        // Typed 3-pair scope: no dictionary allocation, no array copy — a struct boxed once.
+        // Merged with the middleware's per-request scope, so every line below is tagged with all fields.
+        using (_logger.WriteScope("OrderId", orderId, "CustomerId", request.CustomerId, "Currency", request.Currency))
         {
             // Information with two strongly-typed args (zero array allocation).
             _logger.WriteInformation("Order {OrderId} opened for customer {CustomerId}", orderId, request.CustomerId);
@@ -134,8 +129,8 @@ public sealed class OrdersFunction(
             }
 
             // --- Shipment: five fields — stays on the typed, zero-array path (v1.0.2
-            //     extended the typed overloads from 4 to 5 arguments). Six or more
-            //     fields fall back to params object[], same as the framework. ---
+            //     extended hand-written overloads to 5 args; v1.0.3 extended source-generated
+            //     overloads to 6–8 args; v1.0.4 extends to 9–16 args). ---
             var shipmentId = Guid.NewGuid();
             var eta = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2));
             _logger.WriteInformation(

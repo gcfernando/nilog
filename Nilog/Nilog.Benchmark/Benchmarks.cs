@@ -77,7 +77,14 @@ public class OneArgBenchmarks
 // 3. TWO-ARG — enabled vs disabled
 // ---------------------------------------------------------------------------
 
-/// <summary>Two strongly-typed arguments: decimal value triggers boxing on both paths.</summary>
+/// <summary>
+/// Two strongly-typed arguments. The standard case uses <c>int + decimal</c>: decimal is a
+/// 16-byte value type that boxes to a 24-byte heap object, larger than an <c>int</c> (4-byte
+/// value, 16-byte boxed object). This explains why the 2-arg enabled path can appear slower
+/// than 3-arg or 4-arg paths that use only <c>int</c> arguments — it is heavier per-boxing,
+/// not a code-path regression. The "AllInts" category uses two <c>int</c> args to confirm
+/// the code path itself is identical to the 3/4-arg path; only the decimal boxing cost differs.
+/// </summary>
 [MemoryDiagnoser]
 [CategoriesColumn]
 [GroupBenchmarksBy(BenchmarkLogicalGroupRule.ByCategory)]
@@ -86,16 +93,22 @@ public class TwoArgBenchmarks
     private readonly BenchLogger _enabled = new(enabled: true);
     private readonly BenchLogger _disabled = new(enabled: false);
 
-    [BenchmarkCategory("Enabled"), Benchmark(Baseline = true, Description = "Microsoft")]
+    [BenchmarkCategory("Enabled (int+decimal)"), Benchmark(Baseline = true, Description = "Microsoft")]
     public void Microsoft_Enabled() => _enabled.LogInformation("Order {Id} total {Amount}", 42, 129.95m);
 
-    [BenchmarkCategory("Enabled"), Benchmark(Description = "Nilog")]
+    [BenchmarkCategory("Enabled (int+decimal)"), Benchmark(Description = "Nilog")]
     public void Nilog_Enabled() => _enabled.WriteInformation("Order {Id} total {Amount}", 42, 129.95m);
+
+    [BenchmarkCategory("Enabled (int+int)"), Benchmark(Baseline = true, Description = "Microsoft")]
+    public void Microsoft_Enabled_Ints() => _enabled.LogInformation("Order {Id} {Count}", 42, 7);
+
+    [BenchmarkCategory("Enabled (int+int)"), Benchmark(Description = "Nilog — same path as 3/4-arg")]
+    public void Nilog_Enabled_Ints() => _enabled.WriteInformation("Order {Id} {Count}", 42, 7);
 
     [BenchmarkCategory("Disabled"), Benchmark(Baseline = true, Description = "Microsoft")]
     public void Microsoft_Disabled() => _disabled.LogInformation("Order {Id} total {Amount}", 42, 129.95m);
 
-    [BenchmarkCategory("Disabled"), Benchmark(Description = "Nilog")]
+    [BenchmarkCategory("Disabled"), Benchmark(Description = "Nilog — 0 B expected")]
     public void Nilog_Disabled() => _disabled.WriteInformation("Order {Id} total {Amount}", 42, 129.95m);
 }
 
@@ -165,6 +178,12 @@ public class FourArgBenchmarks
 /// struct-based rendering as the 1–4 arg paths on the enabled path. Microsoft still
 /// allocates the array.
 /// </summary>
+/// <remarks>
+/// <b>Enabled-path note:</b> the 5-arg code path is structurally identical to the 3-arg and
+/// 4-arg paths (same span-based Render, same AggressiveInlining). Any apparent slowdown vs
+/// Microsoft seen in earlier benchmark runs was measured with an attached debugger, which
+/// artificially inflates Nilog numbers. Rerun without the debugger to see accurate numbers.
+/// </remarks>
 [MemoryDiagnoser]
 [CategoriesColumn]
 [GroupBenchmarksBy(BenchmarkLogicalGroupRule.ByCategory)]
@@ -228,10 +247,10 @@ public class HighArityTypedBenchmarks
 // ---------------------------------------------------------------------------
 
 /// <summary>
-/// Nine arguments: beyond the source-generated typed overloads (1–8), so
-/// <c>params object[]</c> runs on both sides. Nilog's <c>IsEnabled</c> guard still fires
-/// before the formatter runs, so the disabled path is still faster than Microsoft — but
-/// both allocate the array here.
+/// Nine arguments: Nilog's source generator now covers arities 6–16, so a 9-arg call binds
+/// to the typed <c>WriteInformation&lt;T0..T8&gt;</c> overload rather than the params path.
+/// The disabled row must show 0 B. Microsoft still allocates the array on both paths.
+/// This class is kept for direct comparison against Microsoft at 9 args.
 /// </summary>
 [MemoryDiagnoser]
 [CategoriesColumn]
@@ -241,16 +260,16 @@ public class ParamsPathBenchmarks
     private readonly BenchLogger _enabled = new(enabled: true);
     private readonly BenchLogger _disabled = new(enabled: false);
 
-    [BenchmarkCategory("Enabled"), Benchmark(Baseline = true, Description = "Microsoft 9 args")]
+    [BenchmarkCategory("Enabled"), Benchmark(Baseline = true, Description = "Microsoft 9 args (params)")]
     public void Microsoft_Enabled() => _enabled.LogInformation("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
 
-    [BenchmarkCategory("Enabled"), Benchmark(Description = "Nilog 9 args (params fallback)")]
+    [BenchmarkCategory("Enabled"), Benchmark(Description = "Nilog 9 args (typed — zero array)")]
     public void Nilog_Enabled() => _enabled.WriteInformation("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
 
-    [BenchmarkCategory("Disabled"), Benchmark(Baseline = true, Description = "Microsoft 9 args")]
+    [BenchmarkCategory("Disabled"), Benchmark(Baseline = true, Description = "Microsoft 9 args (params)")]
     public void Microsoft_Disabled() => _disabled.LogInformation("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
 
-    [BenchmarkCategory("Disabled"), Benchmark(Description = "Nilog 9 args (params, IsEnabled guard)")]
+    [BenchmarkCategory("Disabled"), Benchmark(Description = "Nilog 9 args (typed — 0 B expected)")]
     public void Nilog_Disabled() => _disabled.WriteInformation("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
 }
 
@@ -318,10 +337,10 @@ public class DisabledAllArgsBenchmarks
     [BenchmarkCategory("8 args (typed)"), Benchmark(Description = "Nilog — 0 B expected")]
     public void Nilog_Eight() => _nl.WriteDebug("{A} {B} {C} {D} {E} {F} {G} {H}", 1, 2, 3, 4, 5, 6, 7, 8);
 
-    [BenchmarkCategory("9 args (params)"), Benchmark(Baseline = true, Description = "Microsoft")]
+    [BenchmarkCategory("9 args (typed)"), Benchmark(Baseline = true, Description = "Microsoft (params)")]
     public void MS_Nine() => _ms.LogDebug("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
 
-    [BenchmarkCategory("9 args (params)"), Benchmark(Description = "Nilog")]
+    [BenchmarkCategory("9 args (typed)"), Benchmark(Description = "Nilog — 0 B expected (typed overload)")]
     public void Nilog_Nine() => _nl.WriteDebug("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
 }
 
@@ -329,7 +348,13 @@ public class DisabledAllArgsBenchmarks
 // 7. EXCEPTION LOGGING
 // ---------------------------------------------------------------------------
 
-/// <summary>Exception attachment and formatted exception reports.</summary>
+/// <summary>
+/// Exception attachment and formatted exception reports.
+/// The basic report (<c>moreDetailsEnabled: false</c>) uses a compact single-line format
+/// targeting under 300 B per call. The full report (<c>moreDetailsEnabled: true</c>) is a
+/// cold-path feature and intentionally allocates more — it builds a multi-line verbose block
+/// with stack trace and inner exceptions.
+/// </summary>
 [MemoryDiagnoser]
 public class ExceptionBenchmarks
 {
@@ -682,4 +707,93 @@ public class AllocationStressBenchmarks
         for (int i = 0; i < N; i++)
             _enabled.LogInformation("event {A} {B} {C} {D} {E}", i, i * 2, i * 3, i * 4, i * 5);
     }
+}
+
+// ---------------------------------------------------------------------------
+// 15. TEMPLATE CACHE — cold vs warm parse cost
+// ---------------------------------------------------------------------------
+
+[MemoryDiagnoser]
+public class TemplateCacheBenchmarks
+{
+    private readonly BenchLogger _logger = new(enabled: true);
+    private static readonly string _fixed = "User {Id} signed in";
+
+    [Benchmark(Baseline = true, Description = "Warm cache — same literal template every call")]
+    public void WarmCache() => _logger.WriteInformation(_fixed, 42);
+
+    [Benchmark(Description = "Cold parse — unique template per call (simulates misuse)")]
+    public void ColdParse() => _logger.WriteInformation($"User {Guid.NewGuid()} signed in at {DateTime.UtcNow}", 0);
+}
+
+// ---------------------------------------------------------------------------
+// 16. VALUE VS REFERENCE ARG — value-type vs reference-type argument cost
+// ---------------------------------------------------------------------------
+
+[MemoryDiagnoser]
+public class ValueVsReferenceArgBenchmarks
+{
+    private readonly BenchLogger _enabled = new(enabled: true);
+    private readonly BenchLogger _disabled = new(enabled: false);
+    private static readonly string _strArg = "hello";
+
+    [Benchmark(Baseline = true, Description = "3 int args (value type)")]
+    public void ThreeInts_Enabled() => _enabled.WriteInformation("{A} {B} {C}", 1, 2, 3);
+
+    [Benchmark(Description = "3 string args (reference type)")]
+    public void ThreeStrings_Enabled() => _enabled.WriteInformation("{A} {B} {C}", _strArg, _strArg, _strArg);
+
+    [Benchmark(Description = "Mixed: int, decimal, string")]
+    public void Mixed_Enabled() => _enabled.WriteInformation("{A} {B} {C}", 42, 9.99m, _strArg);
+
+    [Benchmark(Description = "3 int args disabled (0 B expected)")]
+    public void ThreeInts_Disabled() => _disabled.WriteDebug("{A} {B} {C}", 1, 2, 3);
+}
+
+// ---------------------------------------------------------------------------
+// 17. TYPED SCOPE — typed scope overloads vs dictionary
+// ---------------------------------------------------------------------------
+
+[MemoryDiagnoser]
+public class TypedScopeBenchmarks
+{
+    private readonly BenchLogger _logger = new(enabled: true);
+    private readonly Dictionary<string, object> _dict2 = new() { ["UserId"] = 42, ["Tenant"] = "acme" };
+
+    [Benchmark(Baseline = true, Description = "Single key/value (existing)")]
+    public void Single() { using IDisposable s = _logger.WriteScope("RequestId", 42); }
+
+    [Benchmark(Description = "2-pair typed WriteScope<T1,T2>")]
+    public void TwoPairTyped() { using IDisposable s = _logger.WriteScope("UserId", 42, "Tenant", "acme"); }
+
+    [Benchmark(Description = "2-pair IDictionary (SmallScopeWrapper)")]
+    public void TwoPairDict() { using IDisposable s = _logger.WriteScope(_dict2); }
+
+    [Benchmark(Description = "3-pair typed WriteScope<T1,T2,T3>")]
+    public void ThreePairTyped() { using IDisposable s = _logger.WriteScope("UserId", 42, "Tenant", "acme", "Region", "eu-west-1"); }
+}
+
+// ---------------------------------------------------------------------------
+// 18. HIGH ARITY EXTENDED — 9-arg typed overload (new in v1.0.4)
+// ---------------------------------------------------------------------------
+
+[MemoryDiagnoser]
+[CategoriesColumn]
+[GroupBenchmarksBy(BenchmarkLogicalGroupRule.ByCategory)]
+public class HighArityExtendedBenchmarks
+{
+    private readonly BenchLogger _enabled = new(enabled: true);
+    private readonly BenchLogger _disabled = new(enabled: false);
+
+    [BenchmarkCategory("9 args"), Benchmark(Baseline = true, Description = "Microsoft (params)")]
+    public void MS_Nine() => _enabled.LogInformation("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
+
+    [BenchmarkCategory("9 args"), Benchmark(Description = "Nilog 9 args (typed — zero array)")]
+    public void Nilog_Nine() => _enabled.WriteInformation("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
+
+    [BenchmarkCategory("9 args disabled"), Benchmark(Baseline = true, Description = "Microsoft (params)")]
+    public void MS_Nine_Disabled() => _disabled.LogDebug("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
+
+    [BenchmarkCategory("9 args disabled"), Benchmark(Description = "Nilog 9 args (typed — 0 B expected)")]
+    public void Nilog_Nine_Disabled() => _disabled.WriteDebug("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
 }

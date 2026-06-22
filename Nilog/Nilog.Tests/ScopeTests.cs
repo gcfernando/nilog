@@ -230,4 +230,63 @@ public class ScopeTests
         Assert.Equal("Env", values[0].Key);
         Assert.Equal("prod", values[0].Value);
     }
+
+    // Typed WriteScope<T1,T2> overloads
+    [Fact]
+    public void TypedTwoPairScope_PushesAllPairs()
+    {
+        TestLogger logger = new();
+        using (logger.WriteScope("UserId", 42, "Tenant", "acme"))
+        { }
+        IReadOnlyList<KeyValuePair<string, object>> values = TestLogger.ScopeValues(logger.Scopes[0]);
+        Assert.Equal(2, values.Count);
+        Assert.Contains(values, kv => kv.Key == "UserId" && (int)kv.Value == 42);
+        Assert.Contains(values, kv => kv.Key == "Tenant" && (string)kv.Value == "acme");
+    }
+
+    [Fact]
+    public void TypedThreePairScope_PushesAllPairs()
+    {
+        TestLogger logger = new();
+        using (logger.WriteScope("A", 1, "B", "two", "C", 3.0))
+        { }
+        IReadOnlyList<KeyValuePair<string, object>> values = TestLogger.ScopeValues(logger.Scopes[0]);
+        Assert.Equal(3, values.Count);
+        Assert.Contains(values, kv => kv.Key == "A" && (int)kv.Value == 1);
+        Assert.Contains(values, kv => kv.Key == "B" && (string)kv.Value == "two");
+        Assert.Contains(values, kv => kv.Key == "C" && (double)kv.Value == 3.0);
+    }
+
+    [Fact]
+    public void TypedFourPairScope_PushesAllPairs()
+    {
+        TestLogger logger = new();
+        using (logger.WriteScope("K1", 1, "K2", 2, "K3", 3, "K4", 4))
+        { }
+        IReadOnlyList<KeyValuePair<string, object>> values = TestLogger.ScopeValues(logger.Scopes[0]);
+        Assert.Equal(4, values.Count);
+        Assert.Contains(values, kv => kv.Key == "K1" && (int)kv.Value == 1);
+        Assert.Contains(values, kv => kv.Key == "K4" && (int)kv.Value == 4);
+    }
+
+    [Fact]
+    public void TypedTwoPairScope_NullValue_BecomesNA()
+    {
+        TestLogger logger = new();
+        using (logger.WriteScope<object?, string>("Key1", null, "Key2", "val"))
+        { }
+        IReadOnlyList<KeyValuePair<string, object>> values = TestLogger.ScopeValues(logger.Scopes[0]);
+        Assert.Equal("N/A", values[0].Value);
+        Assert.Equal("val", values[1].Value);
+    }
+
+    [Fact]
+    public void TypedTwoPairScope_ToString_FormatsCorrectly()
+    {
+        TestLogger logger = new();
+        IDisposable scope = logger.WriteScope("RequestId", "abc", "UserId", 42);
+        string? text = logger.Scopes[0]?.ToString();
+        scope.Dispose();
+        Assert.Equal("RequestId=abc UserId=42", text);
+    }
 }

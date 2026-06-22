@@ -15,4 +15,10 @@
 
 using BenchmarkDotNet.Running;
 
+// Benchmarks must not run with an attached debugger — measurements are unreliable.
+if (System.Diagnostics.Debugger.IsAttached)
+    throw new InvalidOperationException(
+        "Benchmarks must not run with an attached debugger. " +
+        "Run with: dotnet run -c Release --project Nilog.Benchmark -- --filter \"*\" --join");
+
 BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);

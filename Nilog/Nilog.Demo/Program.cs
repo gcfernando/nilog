@@ -116,11 +116,12 @@ Section("3. Six to eight values — still zero-array typed (NEW in v1.0.3)");
         shipmentId, "DHL", "Express", "Berlin", "DE", new DateOnly(2026, 6, 16), 2.4); // 7 args, typed
 }
 
-Section("3b. Nine or more values — the familiar params path");
+Section("3b. Nine values — still typed and zero-allocation (source-generated, 6–16 args)");
 {
-    // Nine+ arguments transparently use the params object[] overload (one array, exactly
-    // like the framework). Handy when an event genuinely has many fields — but prefer a
-    // scope (Section 8) plus ≤ 8 inline values where you can.
+    // The source generator covers arities 6–16, so a 9-arg call binds to the typed
+    // WriteInformation<T0..T8> overload — no object[] built, and 0 B allocated when
+    // the level is disabled. Prefer a scope (Section 8) plus fewer inline values
+    // when you can, but 9-16 args are fully supported without the params tax.
     var shipmentId = Guid.Parse("3c4d5e6f-7081-4293-aabb-ccddeeff0011");
     shipping.WriteInformation(
         "Shipment {ShipmentId} {Carrier} {Service} {City} {Country} {Eta} {Kg} {Zone} {Priority}",
@@ -235,22 +236,27 @@ Section("8. Scopes — correlate every line in a request without repeating yours
     {
         http.WriteInformation("Received POST /api/orders");
 
-        // A richer context bag — small bags (<= 4 entries) take an allocation-light path.
-        var requestContext = new Dictionary<string, object>
-        {
-            ["CustomerId"] = customerId,
-            ["Tenant"] = "acme-eu",
-            ["ClientIp"] = "203.0.113.42",
-        };
-        using (http.WriteScope(requestContext))
+        // Typed scope overloads (2–4 pairs) avoid the dictionary allocation entirely:
+        // no array copy, no SmallScopeWrapper — just a struct boxed once by BeginScope.
+        using (http.WriteScope("CustomerId", customerId, "Tenant", "acme-eu", "ClientIp", "203.0.113.42"))
         {
             orders.WriteInformation("Order {OrderId} created", orderId);
             payments.WriteInformation("Payment captured for order {OrderId}", orderId);
         }
 
-        // Feature A: IReadOnlyDictionary (and any IEnumerable<KVP>) routes to the
-        // IEnumerable overload. Dictionary<K,V> typed as IDictionary still uses the
-        // more-derived IDictionary overload, so existing callers are unaffected.
+        // Two-pair typed scope — even lighter than the 3-pair above.
+        using (http.WriteScope("TraceId", "4bf92f3577b34da6a3ce929d0e0e4736", "SpanId", "00f067aa0ba902b7"))
+        {
+            orders.WriteInformation("Distributed trace context propagated");
+        }
+
+        // Four-pair typed scope — maximum without falling back to dictionary wrapper.
+        using (http.WriteScope("Region", "eu-west-1", "Az", "az-1", "Host", "checkout-01", "Pod", "pod-7b"))
+        {
+            orders.WriteInformation("Infrastructure context captured");
+        }
+
+        // Dictionary scope still works for dynamic or unknown-count contexts.
         IReadOnlyDictionary<string, object> traceCtx = new Dictionary<string, object>
         {
             ["TraceId"] = "4bf92f3577b34da6a3ce929d0e0e4736",
@@ -258,7 +264,7 @@ Section("8. Scopes — correlate every line in a request without repeating yours
         };
         using (http.WriteScope(traceCtx))
         {
-            orders.WriteInformation("Distributed trace context propagated");
+            orders.WriteInformation("Legacy IReadOnlyDictionary scope also supported");
         }
 
         http.WriteInformation("Responded 201 Created in 128 ms");
