@@ -62,7 +62,7 @@ public class HookTests
     {
         int flushed = 0;
         Task cb(CancellationToken _)
-        { _ = Interlocked.Increment(ref flushed); return Task.CompletedTask; }
+        { Interlocked.Increment(ref flushed); return Task.CompletedTask; }
 
         Nilogger.RegisterFlush(cb);
         try
@@ -105,7 +105,7 @@ public class HookTests
         int second = 0;
         Task bad(CancellationToken _) => throw new InvalidOperationException("sink down");
         Task good(CancellationToken _)
-        { _ = Interlocked.Increment(ref second); return Task.CompletedTask; }
+        { Interlocked.Increment(ref second); return Task.CompletedTask; }
 
         Nilogger.RegisterFlush(bad);
         Nilogger.RegisterFlush(good);
@@ -127,7 +127,7 @@ public class HookTests
     {
         int flushed = 0;
         Task cb(CancellationToken _)
-        { _ = Interlocked.Increment(ref flushed); return Task.CompletedTask; }
+        { Interlocked.Increment(ref flushed); return Task.CompletedTask; }
 
         Nilogger.RegisterFlush(cb);
         Assert.True(Nilogger.UnregisterFlush(cb));
