@@ -1,10 +1,10 @@
 <div align="center">
 
-# ⚡ Nilog
+# ⚡ Nilog — Zero-Allocation ILogger Extensions for .NET
 
-### Zero-allocation, high-performance logging for `Microsoft.Extensions.Logging`
+### High-performance C# structured logging extensions for `Microsoft.Extensions.Logging`.
 
-**Same `ILogger`. Same `{Named}` templates. None of the garbage.**
+**Typed message-template overloads reduce call-site allocations while preserving your existing `ILogger` pipeline and sinks.**
 
 [![NuGet](https://img.shields.io/badge/NuGet-v1.0.5-004880?logo=nuget&logoColor=white)](https://www.nuget.org/packages/Nilog)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
