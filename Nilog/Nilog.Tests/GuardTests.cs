@@ -65,7 +65,7 @@ public class GuardTests
     public void WriteError_NullException_Throws()
     {
         TestLogger logger = new();
-        _ = Assert.Throws<ArgumentNullException>(() => logger.WriteError("msg", (Exception)null!));
+        _ = Assert.Throws<ArgumentNullException>(() => logger.WriteError("msg", null!));
     }
 
     [Fact]
@@ -129,7 +129,7 @@ public class GuardTests
     public void WriteError_NoArgs_NullException_Throws()
     {
         TestLogger logger = new();
-        _ = Assert.Throws<ArgumentNullException>(() => logger.WriteError("msg", (Exception)null!));
+        _ = Assert.Throws<ArgumentNullException>(() => logger.WriteError("msg", null!));
     }
 
     [Fact]
@@ -149,7 +149,7 @@ public class GuardTests
     public void WriteCritical_NoArgs_NullException_Throws()
     {
         TestLogger logger = new();
-        _ = Assert.Throws<ArgumentNullException>(() => logger.WriteCritical("msg", (Exception)null!));
+        _ = Assert.Throws<ArgumentNullException>(() => logger.WriteCritical("msg", null!));
     }
 
     // Feature A guard — IEnumerable overload must validate its logger argument.

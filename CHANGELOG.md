@@ -9,6 +9,171 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Nothing yet._
 
+## [1.0.5] - 2026-10-07
+
+This is a hardening/audit release: no new public APIs, no behavioural redesign. It re-validates
+the v1.0.4 implementation end-to-end (architecture, allocation, memory, concurrency, template
+cache, scopes, exceptions, flush/lifecycle, analyzers, packaging) and corrects the documentation
+drift that audit uncovered.
+
+### ⚙️ Configuration & usability
+
+- **Clarified that zero Nilog-specific configuration was already optional** — `README.md`'s
+  "Global configuration" section implied that `Nilogger` settings were something applications
+  needed to set up. No runtime configuration requirement was removed (there never was a required
+  one); the section was renamed and reworded to say so explicitly — see "Documentation" below.
+- **`FlushAsync` wording corrected** — `README.md` previously described `FlushAsync` in one place
+  as "a deliberate no-op placeholder" for a hypothetical future buffering sink, which contradicted
+  the real `RegisterFlush`/`UnregisterFlush`-backed flush implementation shipped since v1.0.3 and
+  documented correctly elsewhere in the same file. Reworded consistently everywhere: `FlushAsync`
+  performs a real, in-order await of every callback registered via `RegisterFlush`, and remains a
+  zero-allocation no-op only when nothing has been registered.
+- **`ShutdownUtcTimer` wording corrected** — the configuration table previously said it "stops the
+  background timestamp-cache timer," which no longer matches the implementation: the UTC
+  timestamp cache has used lazy, on-read refresh with no persistent background `Timer` since
+  **v1.0.2** (see that release's changelog entry). Reworded to state plainly that no background
+  timer exists, that the method forces one final refresh for deterministic teardown, and that it
+  is kept only for source/binary compatibility — not something normal applications need to call.
+- **Separated MEL configuration from Nilog-specific hooks** — the renamed "Optional advanced
+  configuration" section now shows standard `Microsoft.Extensions.Logging` level/filter
+  configuration (`SetMinimumLevel`, `AddFilter`, `AddConsole`) as belonging to MEL, distinct from
+  the handful of optional Nilog hooks (`ExceptionFormatter`, `MaxTemplateCacheEntries`,
+  `UseAsyncSinkProvider`/`AsyncSinkFilter`, `RegisterFlush`/`UnregisterFlush`/`FlushAsync`,
+  `ShutdownUtcTimer`), none of which are required for normal use.
+
+### 📝 Documentation
+
+- **Stale test counts corrected** — the project table in `README.md` reported `Nilog.Tests` as
+  "188 tests" and `Nilog.Analyzers.Tests` as "22 tests"; a full `dotnet test -c Release` run
+  across net8.0/net9.0/net10.0 shows the actual, current counts are **179** and **31**
+  respectively (matching the "210 passing" badge, which was already correct). Updated to match.
+- **Current-version references bumped to 1.0.5** — the NuGet badge and the `PackageReference`
+  install examples for `Nilog` and `Nilog.Analyzers` in `README.md` and `Nilog/README.nuget.md`
+  now point at `1.0.5`. Historical "(v1.0.4)"/"NEW in v1.0.4" annotations that document when a
+  specific feature (16-arg typed overloads, typed multi-pair scopes, compact exception report,
+  etc.) was introduced are left untouched — they remain historically correct.
+- **Benchmark provenance clarified** — the benchmarks section states explicitly which numbers
+  were freshly measured and when. All published numbers are a fresh BenchmarkDotNet run against
+  the final compiled v1.0.5 runtime code (21 benchmark classes, measured 2026-10-07; see "Final
+  runtime validation" below) — no v1.0.4 numbers are presented as current without being re-run,
+  since this release does not modify any of the measured hot paths but the figures were
+  re-verified rather than merely carried forward.
+- **"Global configuration" renamed to "Optional advanced configuration"** — the section heading,
+  table of contents entry, and in-text anchors in `README.md` were renamed and the section
+  rewritten to lead with an explicit "no Nilog-specific configuration or DI registration is
+  required for normal use" callout, with MEL configuration (`SetMinimumLevel`, `AddFilter`,
+  `AddConsole`, …) and optional Nilog hooks now presented in clearly separated, explicitly
+  optional subsections.
+- **Stale enabled-path allocation/time percentages corrected** — several places in `README.md`
+  and `Nilog/README.nuget.md` (the before/after table, the FAQ, and the API-walkthrough text)
+  still quoted an earlier approximation ("25–32% less", "37% faster on the 9-arg enabled path",
+  "~6 ns" for the 0-arg enabled path). Replaced with the figures that actually match the current
+  benchmark tables in the same documents: **26–29% less allocation** across 2–8 typed args,
+  **72% faster / ~4.1 ns** for the 0-arg enabled path, and **12% faster** at 9 args (where 368 B
+  of boxing is unavoidable on both sides).
+- **`Nilog.Tests` test-count corrected** — the `dotnet test` comment in `README.md` still said
+  "188 core tests + 22 analyzer tests = 210 total", left over from before the "Stale test counts
+  corrected" fix above was applied everywhere; updated to **179 core + 31 analyzer = 210 unique
+  tests**, and clarified that the 630 figure elsewhere in the same document is the count of
+  **target-framework executions** (210 unique tests × 3 TFMs), not a distinct, larger test count.
+- **`Nilog/README.nuget.md` restructured** to match the documented consumer-facing outline: added
+  a short **"What Nilog is"** lead-in, an explicit **"Configuration"** section stating no
+  Nilog-specific configuration or DI registration is required for normal use (with the standard
+  MEL filter/level example kept separate from the optional Nilog hooks), a **"Structured
+  logging"** section showing the rendered message / named properties / `{OriginalFormat}`
+  contract, and a **"Provider compatibility"** section that explains compatibility is through
+  `Microsoft.Extensions.Logging` and explicitly does not claim direct MongoDB/Elasticsearch/
+  SQL/Oracle integrations.
+
+### 🧪 Verification performed
+
+- `dotnet build -c Release` — solution builds clean (0 warnings, 0 errors) across net8.0/net9.0/net10.0.
+- `dotnet test -c Release` — **179/179** `Nilog.Tests` and **31/31** `Nilog.Analyzers.Tests` pass
+  on every supported target framework (630 total test executions, 0 failed, 0 skipped).
+- Re-reviewed the template cache (bounded `ConcurrentDictionary`, warn-once-and-stop-caching
+  behaviour at `MaxTemplateCacheEntries`), scope wrappers, `FlushAsync`/`RegisterFlush` lifecycle,
+  the UTC timestamp cache (lazy refresh, no background timer), and the Roslyn analyzer/code-fix
+  project. No correctness, concurrency, or memory-retention regressions were found relative to
+  the behaviour already shipped and tested in v1.0.4.
+
+### 📦 Versioning
+
+- `Nilog` (`Nilog.Core`) and `Nilog.Analyzers` package versions bumped from `1.0.4` to `1.0.5`.
+
+### 📊 Final runtime validation (independent pass, same 1.0.5 release)
+
+A second, independent validation pass was performed against the same final v1.0.5 codebase to
+confirm the production-readiness claims above with real builds, publishes, and provider
+integrations rather than code inspection alone. The version was **not** changed.
+
+- **Fresh BenchmarkDotNet run** — re-ran the complete, current suite of 21 benchmark classes
+  (not 20; `ParallelBenchmarks`, `StressBenchmarks`, and `AllocationStressBenchmarks` were
+  previously undercounted) against the compiled v1.0.5 runtime on 2026-10-07. Confirmed 0 B
+  disabled-path allocation for typed 0–9 args, typed 2/3-pair scope allocation parity with a
+  single-key scope (24 B, no dictionary), and the documented template-cache warm/cold-parse
+  speedup (345× time, 19.3× allocation). `README.md`/`Nilog/README.nuget.md` benchmark tables are
+  updated with these fresh numbers (see "Documentation" below).
+- **`ParallelBenchmarks` methodology correction** — an initial `ShortRun` (3-iteration) pass
+  showed Nilog allocating *more* than Microsoft under parallel load (8.6 MB vs 5.34 MB). This was
+  investigated and found to be pure statistical noise (StdErr ≈120% of the mean with only 3
+  samples), not a real regression: a `MediumRun` rerun (30 samples) shows Nilog allocating **0 B**
+  vs Microsoft's 5.6 MB, with equal mean time. No runtime code was changed; this is a benchmarking
+  methodology finding, recorded here for transparency.
+- **Native AOT** — published a minimal real consumer with `PublishAot=true` on net10.0: zero
+  Nilog-related AOT/trim warnings, the published native binary runs correctly and structured
+  logging/exception logging work as expected.
+- **Trimming** — published the same consumer with `PublishTrimmed=true` (no AOT): zero Nilog
+  trim warnings, logging/templates/scopes/exceptions all verified at runtime.
+- **Real Serilog integration** — exercised `Nilog` extension methods through
+  `Microsoft.Extensions.Logging` into the actual `Serilog.Extensions.Logging` provider and
+  `Serilog.Sinks.InMemory`; verified level, rendered message, structured properties,
+  `{OriginalFormat}`, exception, and scope state all arrive correctly at the sink.
+- **Real OpenTelemetry integration** — exercised the same call surface through the actual
+  `OpenTelemetry.Extensions.Logging` provider with `OpenTelemetry.Exporter.InMemory`; verified
+  body, severity, structured attributes, and exception information.
+- **Live ASP.NET Core integration** — a minimal web host handling 50 concurrent HTTP requests,
+  each with a request-correlation scope, verified no scope/property leakage across concurrent
+  requests.
+- **Live Worker Service integration** — a real `BackgroundService` running a dequeue/process loop
+  with scoped `ItemId`, periodic error logging, and graceful `StopAsync`/host shutdown; confirmed
+  no lifecycle exceptions, no callback leak, and clean shutdown.
+- **Azure Functions (`Nilog.Function`)** — rebuilt fresh in Release with 0 warnings/errors.
+  `func` (Azure Functions Core Tools) was not available in this environment, so this is
+  **build-tested only**, not live-host tested; stated explicitly rather than implied.
+- **Package-consumer validation** — ran `dotnet pack -c Release` for `Nilog` and
+  `Nilog.Analyzers`, installed the real generated `.nupkg`s (not project references) into a
+  separate external console project via a local NuGet feed, and confirmed restore, compile,
+  runtime extension-method behaviour, and that the `NILOG002` analyzer diagnostic fires correctly
+  from the installed analyzer package.
+- **NuGet package content inspection** — confirmed both `.nupkg`s contain only the expected
+  assets (lib DLLs + XML docs per TFM, analyzer DLL, README, nuspec) with no test/benchmark/obj
+  leakage.
+- **Template cache stress test** — verified the cache grows to exactly the configured limit
+  (10,000 entries) and stays bounded there even when 100,000–1,000,000 unique templates are
+  logged; logging continues to work correctly after saturation, including under 50,000 concurrent
+  duplicate-template insertions.
+- **Concurrency stress test** — 1/2/4/8/16/32 worker counts (20,000 calls each: cache hits,
+  distinct templates, scopes, periodic exceptions) plus 16 independent logger categories ×
+  10,000 calls each: zero exceptions, no corruption, in every run.
+- **Long-running memory soak** — 3,000,000 mixed log operations (repeated/unique templates,
+  disabled logging, scopes, exceptions) with checkpoints every 500,000 ops: post-forced-GC memory
+  at the end was **below** the measured baseline (no retained-memory growth); Gen0/Gen1/Gen2
+  collection counts were modest (155/6/3) for the full run.
+- **Binary compatibility** — used Microsoft's official `Microsoft.DotNet.ApiCompat.Tool` to
+  compare the real, previously-published `Nilog 1.0.4` package (downloaded from nuget.org) against
+  the newly built `1.0.5` assemblies on all three target frameworks (net8.0/net9.0/net10.0):
+  **no breaking changes found**.
+- **Source compatibility** — compiled a representative v1.0.4-era usage sample (all log levels,
+  typed overloads, `params` fallback, single/typed/dictionary scopes, exception overloads,
+  `ExceptionFormatter` customization, `MaxTemplateCacheEntries`, flush register/unregister/
+  `FlushAsync`, and static `Nilogger.Log`) unchanged against v1.0.5: compiled with 0
+  warnings/errors and ran correctly.
+- **Result**: no new Nilog runtime defects were found during this validation pass. Every anomaly
+  investigated (the `ParallelBenchmarks` allocation discrepancy, an early stress-harness showing
+  "0 cached templates") traced back to a test-harness/benchmark-methodology issue, not a Nilog
+  defect, and was corrected before drawing conclusions.
+
+
 ## [1.0.4] - 2026-06-22
 
 ### Added

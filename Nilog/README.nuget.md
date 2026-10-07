@@ -4,18 +4,27 @@
 
 **Same `ILogger`. Same `{Named}` templates. None of the garbage.**
 
-[![NuGet](https://img.shields.io/badge/NuGet-v1.0.4-004880?logo=nuget&logoColor=white)](https://www.nuget.org/packages/Nilog)
+[![NuGet](https://img.shields.io/badge/NuGet-v1.0.5-004880?logo=nuget&logoColor=white)](https://www.nuget.org/packages/Nilog)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/gcfernando/Nilog/blob/main/LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%209.0%20%7C%2010.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com)
 [![Disabled path](https://img.shields.io/badge/disabled%20call-0%20bytes%20%7C%20%3C0.5%20ns-2ea44f)](https://github.com/gcfernando/Nilog#-benchmarks)
 [![16-arg typed](https://img.shields.io/badge/up%20to%2016--arg%20typed-0%20bytes%20disabled-brightgreen)](https://github.com/gcfernando/Nilog#-benchmarks)
-[![Enabled path](https://img.shields.io/badge/enabled%20path-up%20to%2056%25%20faster-0d6efd)](https://github.com/gcfernando/Nilog#-benchmarks)
+[![Enabled path](https://img.shields.io/badge/enabled%20path-up%20to%2072%25%20faster-0d6efd)](https://github.com/gcfernando/Nilog#-benchmarks)
 [![Analyzer](https://img.shields.io/badge/Nilog.Analyzers-NILOG001--008%20%2B%20codefix-orange)](https://github.com/gcfernando/Nilog#-static-analysis-niloganalyzers)
 [![AOT](https://img.shields.io/badge/Native%20AOT-ready-blueviolet)](https://github.com/gcfernando/Nilog)
 
 > 📖 **Full docs, recipes, and architecture:** [github.com/gcfernando/Nilog](https://github.com/gcfernando/Nilog)
 
 ---
+
+## ⚡ What Nilog is
+
+Nilog is a set of **zero-allocation, strongly-typed extension methods on `ILogger`**. It is not a
+new logging framework, provider, or transport — it sits on top of the `Microsoft.Extensions.Logging`
+(MEL) pipeline you already use, and every call still flows through your existing `ILoggerFactory`
+and provider(s) (Console, Serilog, NLog, OpenTelemetry, Seq, Application Insights, …). Swap
+`LogInformation(...)` for `WriteInformation(...)` and the call site stops allocating a
+`params object[]` on every call — nothing else about your logging setup changes.
 
 The stock `ILogger` extensions allocate a **`params object[]` on every single call** — even when
 the level is switched off and the message is thrown straight in the bin. On a hot path that is
@@ -27,7 +36,7 @@ returns in **under half a nanosecond**.
 ```csharp
 using Nilog;
 
-// 0–16 args: zero allocation when the level is disabled. 30–56% faster when it's enabled.
+// 0–16 args: zero allocation when the level is disabled. 12–72% faster when it's enabled.
 logger.WriteInformation("User {UserId} ordered {Count} items", userId, count);
 
 // Up to sixteen args — still zero-array typed, no object[] ever built (extended to 16 in v1.0.4)
@@ -42,11 +51,11 @@ logger.WriteInformation("User {UserId} bought {Sku} x{Qty} in {Region} via {Chan
 | | |
 |--|--|
 | 🚀 **Zero-alloc disabled path** | 0–**16** typed args → **0 bytes** (proven by unit tests asserting exactly `0L` allocated). Microsoft costs 45–211 ns and 96–368 B per filtered call. |
-| 🆕 **6–16 arg typed overloads (v1.0.4)** | Source-generated `Write*`/`Nilogger.Log` overloads now reach **sixteen** arguments — **0 bytes** disabled; **469× faster** than Microsoft at 9-arg (0.45 ns vs 211 ns). |
+| 🆕 **6–16 arg typed overloads (v1.0.4)** | Source-generated `Write*`/`Nilogger.Log` overloads now reach **sixteen** arguments — **0 bytes** disabled; **256× faster** than Microsoft at 9-arg (1.26 ns vs 321.88 ns). |
 | 🆕 **Typed multi-pair scopes (v1.0.4)** | `WriteScope<T1,T2>`, `WriteScope<T1,T2,T3>`, `WriteScope<T1,T2,T3,T4>` — no dictionary allocation, no array copy for the most common scope shapes. |
 | 🆕 **Compact exception report (v1.0.4)** | `WriteErrorException(ex, more: false)` → **< 300 B** (down from ≈ 992 B); single-line `[Title] Type: Message` summary. |
-| 🏆 **Faster even when enabled** | **30–57% faster** and **25–32% less allocation** than Microsoft across 1–8 args; **37% faster** at 9 args. |
-| 🔥 **No-arg enabled: beats Microsoft** | Plain `WriteInformation("text")` → **~3.8 ns / 0 B** vs Microsoft's ~6.1 ns / 0 B. |
+| 🏆 **Faster even when enabled** | **12–72% faster** and **26–29% less allocation** than Microsoft across 0–9 args. |
+| 🔥 **No-arg enabled: beats Microsoft** | Plain `WriteInformation("text")` → **4.11 ns / 0 B** vs Microsoft's 14.90 ns / 0 B. |
 | 🆕 **Span-based rendering** | Plain `{Name}` templates render through a stack-allocated `Span<char>` — no `StringBuilder`, no pool, no array. |
 | 🆕 **`Nilog.Analyzers` — 8 rules + code fix** | `NILOG001`–`NILOG008`: interpolation (one-click fix), count mismatch, concatenated templates, duplicate, positional, exception-as-value, malformed, and non-PascalCase placeholders — full parity with SerilogAnalyzer. |
 | 🆕 **WriteError/WriteCritical typed no-exception** | `logger.WriteError("Error {Id}", id)` → **zero-array typed overload** (no `params` fallback). |
@@ -60,10 +69,12 @@ logger.WriteInformation("User {UserId} bought {Sku} x{Qty} in {Region} via {Chan
 
 ## 📊 Benchmarks
 
-> Measured with BenchmarkDotNet · .NET 10.0 · Intel Core i7-13850HX · Windows 11.
-> `ShortRun` job — 3 warmup + 3 measurement iterations, Server GC. The 9-arg disabled-path
-> figures (v1.0.4) are from `Nilog.Benchmark`'s `HighArityExtendedBenchmarks`; reproduce with
-> `dotnet run -c Release --project Nilog.Benchmark -f net10.0 -- --filter "*HighArityExtended*"`.
+> Measured with BenchmarkDotNet v0.15.8 · .NET 10.0.12 · Intel Core Ultra 7 265H @ 2.20 GHz ·
+> Windows 11 · SDK 10.0.401. `ShortRun` job — 1 launch, 3 warmup + 3 measurement iterations,
+> Concurrent Server GC (`ParallelBenchmarks` rerun with `MediumRun`, 30 samples, due to higher
+> variance under `Parallel.For`). Freshly measured from the **final v1.0.5 runtime code** across
+> all 21 benchmark classes on 2026-10-07 — not carried forward from v1.0.4. Reproduce with
+> `dotnet run -c Release --project Nilog.Benchmark -f net10.0 -- --filter "*"`.
 
 ### 🏆 Disabled-path: the zero-allocation proof
 
@@ -71,33 +82,33 @@ When the level is filtered off, Microsoft still builds the `object[]` before cal
 
 ```text
 ─── 1-arg disabled call ──────────────────────────────────────────────────
-Microsoft  ████████████████████████████████████  44.74 ns │  96 B ← always allocates
-Nilog      ▏                                       0.46 ns │   0 B ← 97× faster in this benchmark
+Microsoft  ████████████████████████████████████  80.37 ns │  96 B ← always allocates
+Nilog      ▏                                       0.33 ns │   0 B ← 240× faster in this benchmark
 
 ─── 5-arg disabled call (typed overload) ─────────────────────────────────
-Microsoft  ████████████████████████████████████ 132.91 ns │ 224 B
-Nilog      ▏                                       0.23 ns │   0 B ← 577× faster in this benchmark
+Microsoft  ████████████████████████████████████ 217.81 ns │ 224 B
+Nilog      ▏                                       1.20 ns │   0 B ← 182× faster in this benchmark
 
 ─── 8-arg disabled call (typed overload — v1.0.3) ────────────────────────
-Microsoft  ████████████████████████████████████ 221.03 ns │ 336 B
-Nilog      ▏                                       0.82 ns │   0 B ← 268× faster in this benchmark
+Microsoft  ████████████████████████████████████ 310.21 ns │ 336 B
+Nilog      ▏                                       0.37 ns │   0 B ← 831× faster in this benchmark
 
 ─── 9-arg disabled call (typed overload — NEW in v1.0.4) ─────────────────
-Microsoft  ████████████████████████████████████ 211.31 ns │ 368 B
-Nilog      ▏                                       0.45 ns │   0 B ← 469× faster in this benchmark
+Microsoft  ████████████████████████████████████ 321.88 ns │ 368 B
+Nilog      ▏                                       1.26 ns │   0 B ← 256× faster in this benchmark
 ```
 
 | Args | Microsoft | Nilog | Speedup | Bytes saved |
 |-----:|-----------|-------|:-------:|:-----------:|
-| 0 | 5.54 ns / 0 B | **🟢 0.19 ns / 0 B** | **29×** | — |
-| **1** | 44.74 ns / **96 B** | **🟢 0.46 ns / 0 B** | **97×** | **96 B** |
-| **2** | 85.95 ns / **152 B** | **🟢 0.26 ns / 0 B** | **336×** | **152 B** |
-| **3** | 93.06 ns / **168 B** | **🟢 0.47 ns / 0 B** | **198×** | **168 B** |
-| **4 (typed)** | 112.37 ns / **192 B** | **🟢 0.41 ns / 0 B** | **274×** | **192 B** |
-| **5 (typed)** | 132.91 ns / **224 B** | **🟢 0.23 ns / 0 B** | **577×** | **224 B** |
-| **6 (typed, v1.0.3)** | 153.06 ns / **264 B** | **🟢 &lt;1 ns / 0 B** | **&gt;150×** | **264 B** |
-| **8 (typed, v1.0.3)** | 221.03 ns / **336 B** | **🟢 0.82 ns / 0 B** | **268×** | **336 B** |
-| **9 (typed, v1.0.4)** | 211.31 ns / **368 B** | **🟢 0.45 ns / 0 B** | **469×** | **368 B** |
+| 0 | 14.26 ns / 0 B | **🟢 0.46 ns / 0 B** | **31×** | — |
+| **1** | 80.37 ns / **96 B** | **🟢 0.33 ns / 0 B** | **240×** | **96 B** |
+| **2** | 145.33 ns / **152 B** | **🟢 0.24 ns / 0 B** | **601×** | **152 B** |
+| **3** | 140.44 ns / **168 B** | **🟢 0.36 ns / 0 B** | **384×** | **168 B** |
+| **4 (typed)** | 174.25 ns / **192 B** | **🟢 0.35 ns / 0 B** | **497×** | **192 B** |
+| **5 (typed)** | 217.81 ns / **224 B** | **🟢 1.20 ns / 0 B** | **182×** | **224 B** |
+| **6 (typed, v1.0.3)** | 238.64 ns / **264 B** | **🟢 &lt;1 ns / 0 B** | **&gt;500×** | **264 B** |
+| **8 (typed, v1.0.3)** | 310.21 ns / **336 B** | **🟢 0.37 ns / 0 B** | **831×** | **336 B** |
+| **9 (typed, v1.0.4)** | 321.88 ns / **368 B** | **🟢 1.26 ns / 0 B** | **256×** | **368 B** |
 | …10–16 (typed, v1.0.4) | varies | **🟢 &lt;1 ns / 0 B** | **&gt;200×** | **full array** |
 | 17+ (params) | both sides allocate the array — Nilog's `IsEnabled` guard fires first | | | |
 
@@ -109,39 +120,39 @@ Nilog      ▏                                       0.45 ns │   0 B ← 469×
 
 | Scenario | Microsoft | Nilog | Time saved | Alloc saved |
 |----------|-----------|-------|:----------:|:-----------:|
-| **0-arg** (plain static message) | 6.11 ns / 0 B | **🟢 3.84 ns / 0 B** | **37% faster** | — |
-| **1-arg** | 50.23 ns / 112 B | **🟢 35.19 ns / 80 B** | **30% faster** | **29% less** |
-| **3-arg** | 116.78 ns / 152 B | **🟢 51.74 ns / 104 B** | **56% faster** | **32% less** |
-| **4-arg** | 106.14 ns / 192 B | **🟢 63.64 ns / 136 B** | **40% faster** | **29% less** |
-| **5-arg** (typed) | 126.55 ns / 224 B | **🟢 77.70 ns / 160 B** | **39% faster** | **29% less** |
-| **6-arg** (typed, v1.0.3) | 180.33 ns / 264 B | **🟢 100.62 ns / 192 B** | **44% faster** | **27% less** |
-| **8-arg** (typed, v1.0.3) | 232.94 ns / 336 B | **🟢 117.04 ns / 248 B** | **50% faster** | **26% less** |
-| **9-arg** (typed, NEW v1.0.4) | 246.01 ns / 368 B | **🟢 156.21 ns / 368 B** | **37% faster** | — |
+| **0-arg** (plain static message) | 14.90 ns / 0 B | **🟢 4.11 ns / 0 B** | **72% faster** | — |
+| **2-arg** (int+int) | 127.74 ns / 136 B | **🟢 78.04 ns / 96 B** | **39% faster** | **29% less** |
+| **4-arg** (typed) | 176.92 ns / 192 B | **🟢 115.74 ns / 136 B** | **35% faster** | **29% less** |
+| **5-arg** (typed) | 213.39 ns / 224 B | **🟢 118.19 ns / 160 B** | **45% faster** | **29% less** |
+| **6-arg** (typed, v1.0.3) | 258.21 ns / 264 B | **🟢 132.63 ns / 192 B** | **49% faster** | **27% less** |
+| **8-arg** (typed, v1.0.3) | 290.62 ns / 336 B | **🟢 176.44 ns / 248 B** | **39% faster** | **26% less** |
+| **9-arg** (typed, NEW v1.0.4) | 304.78 ns / 368 B | **🟢 267.43 ns / 368 B** | **12% faster** | — |
 
 ### 💥 Stress test — 10,000-call loop, every typed arity
 
 | Scenario | Time | Allocation |
 |----------|-----:|----------------:|
-| 🔴 Microsoft disabled 3/4/5-arg × 10,000 | 733–1,477 μs | 1.56–2.75 MB |
-| 🟢 **Nilog disabled 3/4/5-arg × 10,000** | **~2.9 μs flat** | **0 B** |
-| Microsoft enabled 3/4/5-arg × 10,000 | 913–1,377 μs | 1.88–2.75 MB |
-| 🟢 **Nilog enabled 3/4/5-arg × 10,000** | **582–896 μs** | 1.40–2.11 MB |
+| 🔴 Microsoft disabled 3/4/5-arg × 10,000 | 1,474–2,763 μs | 1.56–2.75 MB |
+| 🟢 **Nilog disabled 3/4/5-arg × 10,000** | **~4.1 μs flat** | **0 B** |
+| Microsoft enabled 3/5-arg × 10,000 | 1,782–2,526 μs | 1.88–2.75 MB |
+| 🟢 **Nilog enabled 3/5-arg × 10,000** | **1,122–1,508 μs** | 1.40–2.11 MB |
 
-The disabled path stays flat at **~2.9 μs with 0 B**, no matter whether the template carries 3, 4,
-or 5 arguments. The enabled loop is consistently **~34–36% faster, ~24–26% less allocation** than
+The disabled path stays flat at **~4.1 μs with 0 B**, no matter whether the template carries 3, 4,
+or 5 arguments. The enabled loop is consistently **~37–40% faster, ~23–26% less allocation** than
 Microsoft across the same range.
 
 ### ⚡ Special paths
 
 | Scenario | Mean | Alloc |
 |----------|-----:|------:|
-| `FlushAsync()` | **~0.2 ns** | **0 B** |
-| `WriteError("msg", ex)` — no args | **4.1 ns** | **0 B** |
-| `WriteError("Error {Id}", id)` — typed, no exception | **31.1 ns** | **72 B** |
-| `Nilogger.Log(…)` 0-arg enabled | **4.0 ns** | **0 B** |
-| Sequential 100,000-call loop (same template) | **4.83 ms** | 11.41 MB (**35% faster, 25% less RAM** than Microsoft's 7.38 ms / 15.22 MB) |
+| `FlushAsync()` | **0.14 ns** | **0 B** |
+| `WriteError("msg", ex)` — no args | **4.75 ns** | **0 B** |
+| `WriteError("Error {Id}", id)` — typed, no exception | **49.13 ns** | **72 B** |
+| `Nilogger.Log(…)` 0-arg enabled | **10.77 ns** | **0 B** |
+| Sequential 100,000-call loop (same template) | **8.80 ms** | 11.41 MB (**37% faster, 25% less RAM** than Microsoft's 13.88 ms / 15.22 MB) |
 
 ---
+
 
 ## ⚠️ Limitations
 
@@ -194,7 +205,7 @@ dotnet add package Nilog
 ```
 
 ```xml
-<PackageReference Include="Nilog" Version="1.0.4" />
+<PackageReference Include="Nilog" Version="1.0.5" />
 ```
 
 Targets **.NET 8.0, 9.0, and 10.0**. Dependencies: `Microsoft.Extensions.Logging.Abstractions`
@@ -212,7 +223,7 @@ ILogger logger = LoggerFactory
     .Create(b => b.AddConsole())
     .CreateLogger("App");
 
-// Plain message — ~3.8 ns, 0 bytes
+// Plain message — ~4.1 ns, 0 bytes
 logger.WriteInformation("Service started");
 
 // Structured, strongly-typed, zero array allocation (1–16 args)
@@ -229,6 +240,67 @@ catch (Exception ex)
     logger.WriteError("Checkout failed for cart {CartId}", ex, cartId);
 }
 ```
+
+> [!IMPORTANT]
+> **No Nilog-specific configuration or DI registration is required for normal use.** There is
+> no service to register, no logger factory to construct, and no config file to maintain — just
+> `using Nilog;` and the existing `ILogger` you already have.
+
+---
+
+## ⚙️ Configuration
+
+Nilog has **nothing to configure for normal use**. Log levels, categories, and providers remain
+**standard `Microsoft.Extensions.Logging` configuration** and work exactly as they do today:
+
+```csharp
+builder.Logging
+    .SetMinimumLevel(LogLevel.Information)
+    .AddFilter("Microsoft", LogLevel.Warning)
+    .AddConsole();
+```
+
+A few **optional**, process-wide static hooks exist on `Nilogger` for advanced scenarios —
+`ExceptionFormatter` (custom exception rendering), `MaxTemplateCacheEntries` (template-cache
+ceiling, default 10,000), and `RegisterFlush`/`UnregisterFlush`/`FlushAsync` (draining a custom
+buffering sink). None of them are required; see the
+[full configuration reference](https://github.com/gcfernando/Nilog#-optional-advanced-configuration)
+for details.
+
+---
+
+## 🧩 Structured logging
+
+A single Nilog call carries the same structured contract as the framework's own templated
+logging — no array, no extra allocation:
+
+```csharp
+logger.WriteInformation("User {UserId} bought {Sku} x{Qty}", 42, "A-100", 3);
+```
+
+| What the sink receives | Value |
+|------------------------|-------|
+| Rendered message | `User 42 bought A-100 x3` |
+| `UserId` / `Sku` / `Qty` | `42` / `"A-100"` / `3` |
+| `{OriginalFormat}` | `User {UserId} bought {Sku} x{Qty}` |
+| Exception (if any) | attached via the `Exception`-overload, not as a template value |
+| Scope | whatever `WriteScope(...)` wraps the call in |
+
+Any structured-aware sink — Serilog, Seq, OpenTelemetry, Application Insights — gets clean,
+queryable fields exactly as if you had used the framework's own templated logging.
+
+---
+
+## 🔗 Provider compatibility
+
+Nilog produces standard `Microsoft.Extensions.Logging` state (`IReadOnlyList<KeyValuePair<string,
+object>>` + `{OriginalFormat}`) — it does not implement a provider or sink itself, so it works with
+**any** MEL provider: Console, Debug, Serilog, NLog, OpenTelemetry, Seq, Application Insights, and
+cloud-specific exporters (AWS/GCP). This is contract-compatibility through the real
+`LoggerFactory`/`ILoggerProvider` pipeline (verified by `LoggingEngineInteropTests` and real
+Serilog/OpenTelemetry integration tests) — Nilog does not ship direct integrations with any
+specific database, log store, or cloud service (for example MongoDB, Elasticsearch, SQL, or
+Oracle); those come from whichever MEL provider or sink you choose.
 
 ---
 
@@ -321,7 +393,7 @@ logger.WriteInformation("User " + id + " in");    // concatenation → never a s
 all three at build time across every Nilog call shape:
 
 ```xml
-<PackageReference Include="Nilog.Analyzers" Version="1.0.4" PrivateAssets="all" />
+<PackageReference Include="Nilog.Analyzers" Version="1.0.5" PrivateAssets="all" />
 ```
 
 | Rule | Severity | Catches | Auto-fix |
@@ -445,7 +517,8 @@ static Task FlushAsync(CancellationToken token = default);
 On the disabled path: yes — **0 bytes** for **0–16** typed args (extended to 16 in v1.0.4; asserted
 by the test suite including `DisabledPath_NineTypedArgs_AllocatesZeroBytes`). On the enabled path
 Nilog still allocates the rendered string but avoids the `object[]` for all **1–16** typed args —
-**25–32% less** than the framework for 1–8 args, **37% faster** at 9 args.
+**26–29% less** than the framework for 2–8 args, **72% faster** for plain 0-arg messages, and
+**12% faster** at 9 args (where 368 B of boxing is unavoidable either way).
 
 **What about 9+ arguments?**
 Typed overloads now reach **sixteen** (1–5 hand-written, 6–16 source-generated). A 9-arg disabled

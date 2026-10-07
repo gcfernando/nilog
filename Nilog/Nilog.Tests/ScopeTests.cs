@@ -226,7 +226,7 @@ public class ScopeTests
         }
 
         IReadOnlyList<KeyValuePair<string, object>> values = TestLogger.ScopeValues(logger.Scopes[0]);
-        Assert.Single(values);
+        _ = Assert.Single(values);
         Assert.Equal("Env", values[0].Key);
         Assert.Equal("prod", values[0].Value);
     }

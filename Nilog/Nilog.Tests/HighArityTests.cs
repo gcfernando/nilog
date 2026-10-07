@@ -120,12 +120,16 @@ public class HighArityTests
         TestLogger logger = new() { MinLevel = LogLevel.Warning };
 
         for (int i = 0; i < 50; i++)
+        {
             logger.WriteDebug("{A} {B} {C} {D} {E} {F}", 1, 2, 3, 4, 5, 6);
+        }
 
         long before = GC.GetAllocatedBytesForCurrentThread();
 
         for (int i = 0; i < 10_000; i++)
+        {
             logger.WriteDebug("{A} {B} {C} {D} {E} {F}", 1, 2, 3, 4, 5, 6);
+        }
 
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Assert.Equal(0L, allocated);
@@ -137,12 +141,16 @@ public class HighArityTests
         TestLogger logger = new() { MinLevel = LogLevel.Warning };
 
         for (int i = 0; i < 50; i++)
+        {
             logger.WriteDebug("{A} {B} {C} {D} {E} {F} {G} {H}", 1, 2, 3, 4, 5, 6, 7, 8);
+        }
 
         long before = GC.GetAllocatedBytesForCurrentThread();
 
         for (int i = 0; i < 10_000; i++)
+        {
             logger.WriteDebug("{A} {B} {C} {D} {E} {F} {G} {H}", 1, 2, 3, 4, 5, 6, 7, 8);
+        }
 
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Assert.Equal(0L, allocated);
@@ -173,12 +181,16 @@ public class HighArityTests
         TestLogger logger = new() { MinLevel = LogLevel.Warning };
 
         for (int i = 0; i < 50; i++)
+        {
             logger.WriteDebug("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
+        }
 
         long before = GC.GetAllocatedBytesForCurrentThread();
 
         for (int i = 0; i < 10_000; i++)
+        {
             logger.WriteDebug("{A} {B} {C} {D} {E} {F} {G} {H} {I}", 1, 2, 3, 4, 5, 6, 7, 8, 9);
+        }
 
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Assert.Equal(0L, allocated);

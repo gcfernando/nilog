@@ -87,13 +87,14 @@ public class EnumeratorTests
     public void SingleScope_CanBeEnumerated_ViaForeach_ProducesOnePair()
     {
         TestLogger logger = new();
-        using (logger.WriteScope("Env", "production")) { }
+        using (logger.WriteScope("Env", "production"))
+        { }
 
         IEnumerable<KeyValuePair<string, object>> scope =
             (IEnumerable<KeyValuePair<string, object>>)logger.Scopes[0]!;
 
         List<KeyValuePair<string, object>> collected = [.. scope];
-        Assert.Single(collected);
+        _ = Assert.Single(collected);
         Assert.Equal("Env", collected[0].Key);
         Assert.Equal("production", collected[0].Value);
     }
@@ -113,7 +114,8 @@ public class EnumeratorTests
             ["C"] = 3,
         };
 
-        using (logger.WriteScope(ctx)) { }
+        using (logger.WriteScope(ctx))
+        { }
 
         IEnumerable<KeyValuePair<string, object>> scope =
             (IEnumerable<KeyValuePair<string, object>>)logger.Scopes[0]!;
@@ -140,7 +142,8 @@ public class EnumeratorTests
             ctx[$"K{i}"] = i;
         }
 
-        using (logger.WriteScope(ctx)) { }
+        using (logger.WriteScope(ctx))
+        { }
 
         IEnumerable<KeyValuePair<string, object>> scope =
             (IEnumerable<KeyValuePair<string, object>>)logger.Scopes[0]!;

@@ -157,12 +157,16 @@ public class FourArgTests
 
         // JIT warmup — ensure the method is compiled before we measure.
         for (int i = 0; i < 50; i++)
+        {
             logger.WriteDebug("User {Id} did {Action} in {Region} x{Count}", 42, "login", "us", 1);
+        }
 
         long before = GC.GetAllocatedBytesForCurrentThread();
 
         for (int i = 0; i < 10_000; i++)
+        {
             logger.WriteDebug("User {Id} did {Action} in {Region} x{Count}", 42, "login", "us", 1);
+        }
 
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Assert.Equal(0L, allocated);
@@ -185,7 +189,9 @@ public class FourArgTests
 
             // Fill the cache past the limit with distinct templates.
             for (int i = 0; i < 10; i++)
+            {
                 logger.WriteInformation($"event_{i}_{{Value}}", i);
+            }
 
             // Templates beyond the limit must still render correctly (parsed on the fly).
             logger.WriteInformation("overflow {X} {Y} {Z} {W}", 1, 2, 3, 4);

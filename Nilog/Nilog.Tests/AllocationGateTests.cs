@@ -16,9 +16,17 @@ public class AllocationGateTests
 {
     private static long Measure(Action call)
     {
-        for (int i = 0; i < 50; i++) call(); // JIT warmup
+        for (int i = 0; i < 50; i++)
+        {
+            call(); // JIT warmup
+        }
+
         long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 10_000; i++) call();
+        for (int i = 0; i < 10_000; i++)
+        {
+            call();
+        }
+
         return GC.GetAllocatedBytesForCurrentThread() - before;
     }
 
@@ -68,14 +76,18 @@ public class AllocationGateTests
     public void ExceptionBasicReport_AllocatesBelow300Bytes()
     {
         Exception ex;
-        try { throw new InvalidOperationException("disk full"); } catch (Exception e) { ex = e; }
+        try
+        { throw new InvalidOperationException("disk full"); }
+        catch (Exception e) { ex = e; }
 
         // Use a capturing logger that does not allocate on Log itself.
-        var logger = new CaptureLogger();
+        CaptureLogger logger = new();
 
         // JIT warmup.
         for (int i = 0; i < 50; i++)
+        {
             logger.WriteErrorException(ex, "System Error", moreDetailsEnabled: false);
+        }
 
         long before = GC.GetAllocatedBytesForCurrentThread();
         logger.WriteErrorException(ex, "System Error", moreDetailsEnabled: false);
@@ -88,10 +100,20 @@ public class AllocationGateTests
     private sealed class CaptureLogger : Microsoft.Extensions.Logging.ILogger
     {
         public string? LastMessage;
-        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel l) => true;
-        public IDisposable BeginScope<T>(T s) where T : notnull => Scope.Instance;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel l)
+        {
+            return true;
+        }
+
+        public IDisposable BeginScope<T>(T s) where T : notnull
+        {
+            return Scope.Instance;
+        }
+
         public void Log<T>(Microsoft.Extensions.Logging.LogLevel l, Microsoft.Extensions.Logging.EventId id, T state, Exception? ex, Func<T, Exception?, string> f)
-            => LastMessage = f(state, ex);
+        {
+            LastMessage = f(state, ex);
+        }
 
         private sealed class Scope : IDisposable
         {

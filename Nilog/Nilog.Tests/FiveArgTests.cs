@@ -175,12 +175,16 @@ public class FiveArgTests
 
         // JIT warmup — ensure the method is compiled before we measure.
         for (int i = 0; i < 50; i++)
+        {
             logger.WriteDebug("User {Id} did {Action} in {Region} x{Count} via {Channel}", 42, "login", "us", 1, "web");
+        }
 
         long before = GC.GetAllocatedBytesForCurrentThread();
 
         for (int i = 0; i < 10_000; i++)
+        {
             logger.WriteDebug("User {Id} did {Action} in {Region} x{Count} via {Channel}", 42, "login", "us", 1, "web");
+        }
 
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Assert.Equal(0L, allocated);

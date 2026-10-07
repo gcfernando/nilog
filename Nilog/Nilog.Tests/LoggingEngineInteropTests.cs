@@ -22,11 +22,11 @@ public class LoggingEngineInteropTests
     [Fact]
     public void StructuredState_FlowsThroughRealLoggerFactory()
     {
-        var provider = new CaptureProvider();
+        CaptureProvider provider = new();
         using ILoggerFactory factory = LoggerFactory.Create(b =>
         {
-            b.SetMinimumLevel(LogLevel.Trace);
-            b.AddProvider(provider);
+            _ = b.SetMinimumLevel(LogLevel.Trace);
+            _ = b.AddProvider(provider);
         });
         ILogger logger = factory.CreateLogger("Interop");
 
@@ -50,11 +50,11 @@ public class LoggingEngineInteropTests
     [Fact]
     public void HighArity_FlowsThroughRealLoggerFactory()
     {
-        var provider = new CaptureProvider();
+        CaptureProvider provider = new();
         using ILoggerFactory factory = LoggerFactory.Create(b =>
         {
-            b.SetMinimumLevel(LogLevel.Trace);
-            b.AddProvider(provider);
+            _ = b.SetMinimumLevel(LogLevel.Trace);
+            _ = b.AddProvider(provider);
         });
         ILogger logger = factory.CreateLogger("Interop");
 
@@ -70,14 +70,14 @@ public class LoggingEngineInteropTests
     [Fact]
     public void Exception_FlowsThroughRealLoggerFactory()
     {
-        var provider = new CaptureProvider();
+        CaptureProvider provider = new();
         using ILoggerFactory factory = LoggerFactory.Create(b =>
         {
-            b.SetMinimumLevel(LogLevel.Trace);
-            b.AddProvider(provider);
+            _ = b.SetMinimumLevel(LogLevel.Trace);
+            _ = b.AddProvider(provider);
         });
         ILogger logger = factory.CreateLogger("Interop");
-        var ex = new InvalidOperationException("boom");
+        InvalidOperationException ex = new("boom");
 
         logger.WriteError("Checkout failed for cart {CartId}", ex, "CART-7");
 
@@ -91,11 +91,11 @@ public class LoggingEngineInteropTests
     [Fact]
     public void DisabledLevel_AtFactory_EmitsNothing()
     {
-        var provider = new CaptureProvider();
+        CaptureProvider provider = new();
         using ILoggerFactory factory = LoggerFactory.Create(b =>
         {
-            b.SetMinimumLevel(LogLevel.Warning); // the engine/host decides the level
-            b.AddProvider(provider);
+            _ = b.SetMinimumLevel(LogLevel.Warning); // the engine/host decides the level
+            _ = b.AddProvider(provider);
         });
         ILogger logger = factory.CreateLogger("Interop");
 
@@ -109,7 +109,11 @@ public class LoggingEngineInteropTests
     private sealed class CaptureProvider : ILoggerProvider
     {
         public CaptureLogger Logger { get; } = new();
-        public ILogger CreateLogger(string categoryName) => Logger;
+        public ILogger CreateLogger(string categoryName)
+        {
+            return Logger;
+        }
+
         public void Dispose() { }
     }
 
@@ -120,9 +124,15 @@ public class LoggingEngineInteropTests
         public Exception? Exception { get; private set; }
         public List<KeyValuePair<string, object?>> State { get; } = [];
 
-        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull
+        {
+            return NullScope.Instance;
+        }
 
-        public bool IsEnabled(LogLevel logLevel) => true;
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            return true;
+        }
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
             Func<TState, Exception?, string> formatter)
