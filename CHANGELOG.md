@@ -308,13 +308,13 @@ integrations rather than code inspection alone. The version was **not** changed.
 Measured with BenchmarkDotNet (ShortRun: 3 warmup + 3 measurement, Server GC), .NET 10.0,
 Intel Core i7-13850HX:
 
-| Path | v1.0.3 | v1.0.4 | Δ |
-|------|--------|--------|---|
-| **9-arg disabled** — `WriteDebug("{A}…{I}", 1…9)` | params, 211 ns / 368 B (≈ Microsoft) | **0.45 ns / 0 B** | **≈ 469× faster, zero alloc** |
-| **9-arg enabled** — `WriteInformation("{A}…{I}", 1…9)` | params, 246 ns / 368 B (≈ Microsoft) | **156 ns / 368 B** | **37% faster** (boxing is unavoidable on the enabled path; no array overhead added) |
-| **5-arg enabled** | 77.70 ns / 160 B | **77.70 ns / 160 B** | unchanged — confirmed < 140 ns target ✅ |
-| **2-arg enabled (int+int)** | n/a | **46.27 ns / 96 B** | 34% faster than Microsoft (70 ns / 136 B) |
-| **Compact exception report (basic, `moreDetailsEnabled: false`)** | ≈ 992 B | **< 300 B** | **> 3× less allocation per report** |
+| Path                                                              | v1.0.3                               | v1.0.4               | Δ                                                                                   |
+| ------ | -------- | -------- | --- |
+| **9-arg disabled** — `WriteDebug("{A}…{I}", 1…9)`                 | params, 211 ns / 368 B (≈ Microsoft) | **0.45 ns / 0 B**    | **≈ 469× faster, zero alloc**                                                       |
+| **9-arg enabled** — `WriteInformation("{A}…{I}", 1…9)`            | params, 246 ns / 368 B (≈ Microsoft) | **156 ns / 368 B**   | **37% faster** (boxing is unavoidable on the enabled path; no array overhead added) |
+| **5-arg enabled**                                                 | 77.70 ns / 160 B                     | **77.70 ns / 160 B** | unchanged — confirmed < 140 ns target ✅                                             |
+| **2-arg enabled (int+int)**                                       | n/a                                  | **46.27 ns / 96 B**  | 34% faster than Microsoft (70 ns / 136 B)                                           |
+| **Compact exception report (basic, `moreDetailsEnabled: false`)** | ≈ 992 B                              | **< 300 B**          | **> 3× less allocation per report**                                                 |
 
 The 0–8-arg paths are unchanged from v1.0.3.
 
@@ -409,12 +409,12 @@ The 0–8-arg paths are unchanged from v1.0.3.
 Measured with BenchmarkDotNet (ShortRun: 3 warmup + 3 measurement, Server GC), .NET 10.0,
 Intel Core i7-13850HX:
 
-| Path | v1.0.2 | v1.0.3 | Δ |
-|------|--------|--------|---|
-| **8-arg disabled** — `WriteInformation("{A}…{H}", …)` | params, 221 ns / 336 B (≈ Microsoft) | **0.82 ns / 0 B** | **~268× faster, zero alloc** |
-| **6-arg enabled** — `WriteInformation("{A}…{F}", …)` | params, 180 ns / 264 B (≈ Microsoft) | **100.6 ns / 192 B** | **~44% faster, ~27% less alloc** |
-| **8-arg enabled** — `WriteInformation("{A}…{H}", …)` | params, 233 ns / 336 B (≈ Microsoft) | **117.0 ns / 248 B** | **~50% faster, ~26% less alloc** |
-| **Static `Nilogger.Log`, 5–8 typed args, disabled** | params array (allocated) | **0 B** | **bug fix — now zero-array** |
+| Path                                                  | v1.0.2                               | v1.0.3               | Δ                                |
+| ------ | -------- | -------- | --- |
+| **8-arg disabled** — `WriteInformation("{A}…{H}", …)` | params, 221 ns / 336 B (≈ Microsoft) | **0.82 ns / 0 B**    | **~268× faster, zero alloc**     |
+| **6-arg enabled** — `WriteInformation("{A}…{F}", …)`  | params, 180 ns / 264 B (≈ Microsoft) | **100.6 ns / 192 B** | **~44% faster, ~27% less alloc** |
+| **8-arg enabled** — `WriteInformation("{A}…{H}", …)`  | params, 233 ns / 336 B (≈ Microsoft) | **117.0 ns / 248 B** | **~50% faster, ~26% less alloc** |
+| **Static `Nilogger.Log`, 5–8 typed args, disabled**   | params array (allocated)             | **0 B**              | **bug fix — now zero-array**     |
 
 The 0–5-arg paths are unchanged from v1.0.2 (already correct).
 
@@ -502,15 +502,15 @@ The 0–5-arg paths are unchanged from v1.0.2 (already correct).
 Benchmarks run on .NET 10.0.8, Intel Core i7-13850HX @ 2.10 GHz, BenchmarkDotNet v0.15.8
 (ShortRun: 3 warmup + 3 measurement iterations, Server GC):
 
-| Path | v1.0.1 | v1.0.2 | Δ |
-|------|--------|--------|---|
-| **5-arg disabled** — `WriteInformation("{A}{B}{C}{D}{E}", …)` | params, 28.40 ns / 184 B | **0.25 ns / 0 B** | **~113× faster, zero alloc** |
-| **5-arg enabled** — `WriteInformation("{A}{B}{C}{D}{E}", …)` | params, ~125 ns / 224 B (≈ Microsoft) | **78.15 ns / 160 B** | **39% faster, 29% less alloc than Microsoft** |
-| Plain `{Id}` template render (warm cache) | 37.12 ns / 80 B | **32.78 ns / 80 B** | **~12% faster, same alloc** |
-| Escaped braces + placeholder render | 46.83 ns / 96 B | **32.49 ns / 96 B** | **~31% faster, same alloc** |
-| 100,000-call sequential loop (same template) | 5.55 ms / 11.41 MB | **4.74 ms / 11.41 MB** | **~15% faster, same alloc** |
-| 10,000-call 4-arg enabled loop | 1,216 μs | **807 μs** | **~34% faster** |
-| Exception formatting (basic/full reports) | unchanged | unchanged | no regression from removing the background timer |
+| Path                                                          | v1.0.1                                | v1.0.2                 | Δ                                                |
+| ------ | -------- | -------- | --- |
+| **5-arg disabled** — `WriteInformation("{A}{B}{C}{D}{E}", …)` | params, 28.40 ns / 184 B              | **0.25 ns / 0 B**      | **~113× faster, zero alloc**                     |
+| **5-arg enabled** — `WriteInformation("{A}{B}{C}{D}{E}", …)`  | params, ~125 ns / 224 B (≈ Microsoft) | **78.15 ns / 160 B**   | **39% faster, 29% less alloc than Microsoft**    |
+| Plain `{Id}` template render (warm cache)                     | 37.12 ns / 80 B                       | **32.78 ns / 80 B**    | **~12% faster, same alloc**                      |
+| Escaped braces + placeholder render                           | 46.83 ns / 96 B                       | **32.49 ns / 96 B**    | **~31% faster, same alloc**                      |
+| 100,000-call sequential loop (same template)                  | 5.55 ms / 11.41 MB                    | **4.74 ms / 11.41 MB** | **~15% faster, same alloc**                      |
+| 10,000-call 4-arg enabled loop                                | 1,216 μs                              | **807 μs**             | **~34% faster**                                  |
+| Exception formatting (basic/full reports)                     | unchanged                             | unchanged              | no regression from removing the background timer |
 
 Format-specifier and alignment templates, and the 0–4-arg disabled path, are unaffected —
 they were already correct and use the same code as v1.0.1.
@@ -626,15 +626,15 @@ they were already correct and use the same code as v1.0.1.
 Benchmarks run on .NET 10.0.8, Intel Core i7-13850HX @ 2.10 GHz, BenchmarkDotNet v0.15.8
 (ShortRun: 3 warmup + 3 measurement iterations, Server GC):
 
-| Path | v1.0.0 | v1.0.1 | Δ |
-|------|--------|--------|---|
-| No-arg enabled — `WriteInformation("text")` | 29 ns / 56 B | **4.14 ns / 0 B** | **7× faster, zero alloc** |
-| Feature C — `WriteError("msg", ex)` no args | 36 ns / 72 B | **3.95 ns / 0 B** | **9× faster, zero alloc** |
-| `Nilogger.Log(…)` 0-arg enabled | 27 ns / 40 B | **4.46 ns / 0 B** | **6× faster, zero alloc** |
-| `FlushAsync()` | 1,280 ns / 328 B | **~0.01 ns / 0 B** | **>100,000× faster, zero alloc** |
-| `WriteErrorException(ex)` basic report | 182 ns / 992 B | **99.5 ns / 496 B** | **1.8× faster, 50% less alloc** |
-| **4-arg disabled — `WriteInformation("{A}{B}{C}{D}", …)`** | n/a (params, 113 ns / 192 B) | **0.24 ns / 0 B** | **479× faster vs Microsoft** |
-| **4-arg enabled — `WriteInformation("{A}{B}{C}{D}", …)`** | n/a (params, 122 ns / 192 B) | **71.8 ns / 136 B** | **41% faster, 29% less alloc** |
+| Path                                                       | v1.0.0                       | v1.0.1              | Δ                                |
+| ------ | -------- | -------- | --- |
+| No-arg enabled — `WriteInformation("text")`                | 29 ns / 56 B                 | **4.14 ns / 0 B**   | **7× faster, zero alloc**        |
+| Feature C — `WriteError("msg", ex)` no args                | 36 ns / 72 B                 | **3.95 ns / 0 B**   | **9× faster, zero alloc**        |
+| `Nilogger.Log(…)` 0-arg enabled                            | 27 ns / 40 B                 | **4.46 ns / 0 B**   | **6× faster, zero alloc**        |
+| `FlushAsync()`                                             | 1,280 ns / 328 B             | **~0.01 ns / 0 B**  | **>100,000× faster, zero alloc** |
+| `WriteErrorException(ex)` basic report                     | 182 ns / 992 B               | **99.5 ns / 496 B** | **1.8× faster, 50% less alloc**  |
+| **4-arg disabled — `WriteInformation("{A}{B}{C}{D}", …)`** | n/a (params, 113 ns / 192 B) | **0.24 ns / 0 B**   | **479× faster vs Microsoft**     |
+| **4-arg enabled — `WriteInformation("{A}{B}{C}{D}", …)`**  | n/a (params, 122 ns / 192 B) | **71.8 ns / 136 B** | **41% faster, 29% less alloc**   |
 
 The 1–3-arg disabled and enabled paths are unchanged from v1.0.0 (they were already correct).
 

@@ -2,10 +2,10 @@
 
 ## Supported versions
 
-| Version | Supported |
-|---------|-----------|
-| 1.0.x (latest) | ✅ |
-| < 1.0.6 | ⚠️ Upgrade recommended (see CHANGELOG for hardening fixes) |
+| Version        | Supported                                                  |
+| --------- | ----------- |
+| 1.0.x (latest) | ✅                                                          |
+| < 1.0.6        | ⚠️ Upgrade recommended (see CHANGELOG for hardening fixes) |
 
 ## Reporting a vulnerability
 
@@ -18,13 +18,13 @@ an acknowledgement within 7 days.
 
 Nilog is a call-site extension layer over `Microsoft.Extensions.Logging`.
 
-| Concern | Owner |
-|---------|-------|
-| Bounded template cache, bounded exception reports, isolation of throwing `ToString()` | Nilog |
-| Redaction of secrets/PII in arguments and exception messages | The application |
-| Log-forging protection (newline/control characters in values), encoding, retention | The provider / sink |
-| Exceptions thrown by providers' `Log` implementation | The provider (they propagate) |
-| Templates must be compile-time constants; never build templates from untrusted input | The application (analyzer `NILOG001`/`NILOG003` helps) |
+| Concern                                                                               | Owner                                                  |
+| --------- | ------- |
+| Bounded template cache, bounded exception reports, isolation of throwing `ToString()` | Nilog                                                  |
+| Redaction of secrets/PII in arguments and exception messages                          | The application                                        |
+| Log-forging protection (newline/control characters in values), encoding, retention    | The provider / sink                                    |
+| Exceptions thrown by providers' `Log` implementation                                  | The provider (they propagate)                          |
+| Templates must be compile-time constants; never build templates from untrusted input  | The application (analyzer `NILOG001`/`NILOG003` helps) |
 
 `Exception.Data` is intentionally not rendered in exception reports.
 
