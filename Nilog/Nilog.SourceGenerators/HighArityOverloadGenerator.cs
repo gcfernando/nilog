@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------------
-//  Nilog.SourceGenerators — emits the higher-arity (6-8 argument) zero-array typed
+//  Nilog.SourceGenerators — emits the higher-arity (6-16 argument) zero-array typed
 //  logging overloads directly into Nilog.dll, lifting the hand-written 1-5 argument
 //  ceiling. The generated overloads follow the exact same pattern as the manual
 //  1-5 argument ones: a stack-only LogState<...> struct instead of a params object[],
@@ -16,7 +16,7 @@ namespace Nilog.SourceGenerators;
 
 /// <summary>
 /// Generates strongly-typed, zero-array <c>Write*</c> / <c>Nilogger.Log</c> overloads for
-/// 6, 7, and 8 arguments, extending the hand-written 1-5 argument overloads in
+/// 6 through 16 arguments, extending the hand-written 1-5 argument overloads in
 /// <c>Nilogger.cs</c> without changing their behaviour.
 /// </summary>
 [Generator(LanguageNames.CSharp)]
@@ -242,10 +242,14 @@ public sealed class HighArityOverloadGenerator : IIncrementalGenerator
         sb.AppendLine("        ArgumentNullException.ThrowIfNull(logger);");
         sb.AppendLine("        ArgumentNullException.ThrowIfNull(message);");
         sb.AppendLine($"        if (!logger.IsEnabled(LogLevel.{level})) {{ return; }}");
+        sb.AppendLine($"        if (arg0 is Exception ex0) {{ Emit(logger, LogLevel.{level}, ex0, message, {RestNames(n)}); return; }}");
         sb.AppendLine($"        Emit(logger, LogLevel.{level}, null!, message, {ArgNames(n)});");
         sb.AppendLine("    }");
         sb.AppendLine();
     }
+
+    // "arg1, arg2, ..." (drops the leading argument)
+    private static string RestNames(int n) => string.Join(", ", Enumerable(n - 1, i => "arg" + (i + 1)));
 
     private static void AppendStaticLogOverload(StringBuilder sb, int n)
     {
@@ -258,6 +262,7 @@ public sealed class HighArityOverloadGenerator : IIncrementalGenerator
         sb.AppendLine("    {");
         sb.AppendLine("        ArgumentNullException.ThrowIfNull(logger);");
         sb.AppendLine("        if (!logger.IsEnabled(level)) { return; }");
+        sb.AppendLine($"        if (arg0 is Exception ex0) {{ Emit(logger, level, ex0, message, {RestNames(n)}); return; }}");
         sb.AppendLine($"        Emit(logger, level, null!, message, {ArgNames(n)});");
         sb.AppendLine("    }");
         sb.AppendLine();

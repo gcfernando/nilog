@@ -17,8 +17,8 @@
 		<!-- ===== NuGet package ===== -->
 		<IsPackable>true</IsPackable>
 		<PackageId>Nilog</PackageId>
-		<Version>1.0.5</Version>
-		<Description>Zero-allocation, high-performance logging extensions for Microsoft.Extensions.Logging. Strongly-typed overloads that eliminate the params object[] allocation and allocate nothing when a level is disabled.</Description>
+		<Version>1.0.6</Version>
+		<Description>Zero-allocation, high-performance logging extensions for Microsoft.Extensions.Logging. Strongly-typed overloads (0-16 arguments) that eliminate the params object[] allocation and allocate nothing when a level is disabled and the arguments are statically typed.</Description>
 		<PackageTags>logging;performance;high-performance;zero-allocation;ilogger;structured-logging;loggermessage</PackageTags>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
 		<PackageReadmeFile>README.nuget.md</PackageReadmeFile>
@@ -56,11 +56,11 @@
 		<None Include="..\README.nuget.md" Pack="true" PackagePath="\" />
 	</ItemGroup>
 
-	<ItemGroup Condition="'$(CI)' == 'true'">
+	<ItemGroup>
 		<PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.401" PrivateAssets="All" />
 	</ItemGroup>
 
-	<!-- Build-time-only source generator that emits the 6-8 argument zero-array typed
+	<!-- Build-time-only source generator that emits the 6-16 argument zero-array typed
 	     overloads directly into Nilog.dll. ReferenceOutputAssembly=false keeps the
 	     generator assembly out of the shipped package; consumers only see the generated,
 	     already-compiled overloads. -->

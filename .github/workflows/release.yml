@@ -55,9 +55,9 @@ on:
         description: "Version to build (e.g. 1.2.3)"
         required: true
 
-# Needed so the release job can upload assets onto the Release.
+# Least privilege by default; only the release job is granted write access.
 permissions:
-  contents: write
+  contents: read
 
 # Serialise releases for the same ref. cancel-in-progress is intentionally false:
 # a run that has reached the publish stage must never be killed mid-flight, since a
@@ -86,7 +86,7 @@ jobs:
       version: ${{ steps.ver.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       # Resolve the version (strip a leading "v") from whichever trigger fired:
       #   push tag     -> github.ref_name        (e.g. v1.2.3)
@@ -95,13 +95,18 @@ jobs:
       - name: DetermineVersion
         id: ver
         shell: pwsh
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
           switch ($env:GITHUB_EVENT_NAME) {
-            'push'    { $v = '${{ github.ref_name }}' }
-            'release' { $v = '${{ github.event.release.tag_name }}' }
-            default   { $v = '${{ github.event.inputs.version }}' }
+            'push'    { $v = $env:REF_NAME }
+            'release' { $v = $env:RELEASE_TAG }
+            default   { $v = $env:INPUT_VERSION }
           }
           $v = $v -replace '^v', ''
+          if ($v -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') { throw 'Invalid version format.' }
           if ([string]::IsNullOrWhiteSpace($v)) { throw "Could not resolve a version." }
           "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Building version $v"
@@ -134,7 +139,7 @@ jobs:
           Write-Host "----- release notes for v$ver -----`n$notes"
 
       - name: UploadReleaseNotes
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-notes
           path: release-notes.md
@@ -149,10 +154,10 @@ jobs:
     needs: metadata
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: SetupDotnetSdks
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: |
             8.0.x
@@ -160,7 +165,7 @@ jobs:
             10.0.x
 
       - name: Restore
-        run: dotnet restore ${{ env.TESTS }}
+        run: dotnet restore ${{ env.TESTS }} --locked-mode
 
       # Build + run the xUnit suite (net8.0 / net9.0 / net10.0). A failure here
       # stops the release. Building the test project also builds the library.
@@ -180,10 +185,10 @@ jobs:
     needs: [metadata, test]
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: SetupDotnetSdks
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: |
             8.0.x
@@ -191,7 +196,7 @@ jobs:
             10.0.x
 
       - name: Restore
-        run: dotnet restore ${{ env.LIBRARY }}
+        run: dotnet restore ${{ env.LIBRARY }} --locked-mode
 
       - name: BuildLibrary
         run: >
@@ -203,7 +208,7 @@ jobs:
 
       # Bring back the CHANGELOG notes so they can be embedded in the package.
       - name: DownloadReleaseNotes
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: release-notes
 
@@ -244,7 +249,7 @@ jobs:
           Get-ChildItem artifacts | Format-Table Name, Length
 
       - name: UploadPackageArtifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: nuget-package
           path: |
@@ -263,10 +268,10 @@ jobs:
     needs: [metadata, test]
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: SetupDotnetSdks
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: |
             8.0.x
@@ -299,7 +304,7 @@ jobs:
           }
 
       - name: UploadDemoArtifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: demo-app
           path: artifacts/Nilog.Demo-*.zip
@@ -314,22 +319,24 @@ jobs:
   release:
     runs-on: ubuntu-latest
     needs: [metadata, package, demo]
+    permissions:
+      contents: write
     if: ${{ github.event_name == 'push' || github.event_name == 'release' }}
     steps:
       - name: DownloadPackageArtifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: nuget-package
           path: artifacts
 
       - name: DownloadDemoArtifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: demo-app
           path: artifacts
 
       - name: DownloadReleaseNotes
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: release-notes
 
@@ -339,7 +346,7 @@ jobs:
       # The curated CHANGELOG section becomes the body; generate_release_notes
       # then appends an auto "Full Changelog" compare link beneath it.
       - name: PublishReleaseAndAttachAssets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: v${{ needs.metadata.outputs.version }}
           name: Nilog v${{ needs.metadata.outputs.version }}
@@ -362,12 +369,12 @@ jobs:
     if: ${{ github.event_name == 'push' || github.event_name == 'release' }}
     steps:
       - name: SetupDotnetSdk
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: 8.0.x
 
       - name: DownloadPackageArtifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: nuget-package
           path: artifacts

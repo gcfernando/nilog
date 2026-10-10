@@ -362,6 +362,71 @@ public class MessageTemplateAnalyzerTests
         .Select(path => (MetadataReference)MetadataReference.CreateFromFile(path))
         .ToArray();
 
+    [Fact]
+    public void AlignmentAndFormatSpecifier_CountAsOnePlaceholder_NoNilog002()
+    {
+        ImmutableArray<Diagnostic> diagnostics = GetDiagnostics(Usings + """
+            class C
+            {
+                void M(ILogger logger, int a, double b)
+                {
+                    logger.WriteInformation("{A,5} {B:N2}", a, b);
+                }
+            }
+            """);
+
+        Assert.DoesNotContain(diagnostics, d => d.Id == MessageTemplateAnalyzer.ArgumentCountDiagnosticId);
+    }
+
+    [Fact]
+    public void ExceptionFirstArgument_IsNotCountedAsTemplateArgument()
+    {
+        ImmutableArray<Diagnostic> diagnostics = GetDiagnostics(Usings + """
+            class C
+            {
+                void M(ILogger logger, Exception ex, int a)
+                {
+                    logger.WriteError(ex, "{A}", a);
+                }
+            }
+            """);
+
+        Assert.DoesNotContain(diagnostics, d => d.Id == MessageTemplateAnalyzer.ArgumentCountDiagnosticId);
+    }
+
+    [Fact]
+    public void SurplusArguments_ReportsNilog002()
+    {
+        ImmutableArray<Diagnostic> diagnostics = GetDiagnostics(Usings + """
+            class C
+            {
+                void M(ILogger logger, int a, int b)
+                {
+                    logger.WriteInformation("{A}", a, b);
+                }
+            }
+            """);
+
+        Assert.Contains(diagnostics, d => d.Id == MessageTemplateAnalyzer.ArgumentCountDiagnosticId);
+    }
+
+    [Fact]
+    public void NonNilogMethodWithSimilarShape_NoDiagnostics()
+    {
+        ImmutableArray<Diagnostic> diagnostics = GetDiagnostics(Usings + """
+            class Other { public void WriteInformation(string s, params object[] a) { } }
+            class C
+            {
+                void M(Other o)
+                {
+                    o.WriteInformation("{A} {B}", 1);
+                }
+            }
+            """);
+
+        Assert.DoesNotContain(diagnostics, d => d.Id == MessageTemplateAnalyzer.ArgumentCountDiagnosticId);
+    }
+
     private static ImmutableArray<Diagnostic> GetDiagnostics(string source)
     {
         SyntaxTree tree = CSharpSyntaxTree.ParseText(source);

@@ -215,17 +215,22 @@ public static partial class Nilogger
     // string instead of passing them as arguments. The threshold is generous; a healthy
     // app typically has tens of distinct templates, not thousands.
     private static int _templateCacheWarned;
+    private static int _templateCacheCount;
     private static volatile int _maxTemplateCacheEntries = 10_000;
+    private static volatile int _maxCachedTemplateLength = 1024;
 
     /// <summary>
     /// Gets or sets the maximum number of parsed templates to keep in the template cache.
     /// </summary>
-    /// <value>A positive integer; defaults to 10,000. Values ≤ 0 are ignored.</value>
+    /// <value>A non-negative integer; defaults to 10,000. <c>0</c> disables caching. Negative values are ignored.</value>
     /// <remarks>
     /// Once the cache reaches this limit, new templates are still parsed correctly on each
     /// call but the result is not stored, preventing unbounded memory growth from callers
     /// that use interpolated strings as message templates (e.g. <c>WriteInformation($"User {id}")</c>).
-    /// A diagnostic trace is emitted once when the threshold is first hit.
+    /// The limit is enforced atomically. Lowering it below the current entry count clears the cache,
+    /// which then re-admits templates up to the new limit. Templates longer than
+    /// <see cref="MaxCachedTemplateLength"/> are never cached. A diagnostic trace is emitted once
+    /// when the threshold is first hit.
     /// </remarks>
     public static int MaxTemplateCacheEntries
     {
@@ -233,8 +238,35 @@ public static partial class Nilogger
         get => _maxTemplateCacheEntries;
         set
         {
-            if (value > 0)
+            if (value >= 0)
+            {
                 _maxTemplateCacheEntries = value;
+                if (value < Volatile.Read(ref _templateCacheCount))
+                {
+                    ClearTemplateCache();
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets the longest message template, in characters, that will be cached.
+    /// </summary>
+    /// <value>A positive integer; defaults to 1,024. Non-positive values are ignored.</value>
+    /// <remarks>
+    /// Together with <see cref="MaxTemplateCacheEntries"/> this bounds the cache's retained template text
+    /// to roughly <c>MaxTemplateCacheEntries x MaxCachedTemplateLength</c> characters (plus parsed-segment overhead).
+    /// Longer templates are parsed on every call and are never retained.
+    /// </remarks>
+    public static int MaxCachedTemplateLength
+    {
+        get => _maxCachedTemplateLength;
+        set
+        {
+            if (value > 0)
+            {
+                _maxCachedTemplateLength = value;
+            }
         }
     }
 
@@ -261,8 +293,12 @@ public static partial class Nilogger
         }
 
         TemplateFormatter formatter = _templateCache.TryGetValue(template, out TemplateFormatter? hit) ? hit : AddFormatter(template);
-        _lastTemplate = template;
-        _lastFormatter = formatter;
+        if (template.Length <= 256)
+        {
+            // Don't pin a large dynamic template on every long-lived thread.
+            _lastTemplate = template;
+            _lastFormatter = formatter;
+        }
         return formatter;
     }
 
@@ -272,34 +308,69 @@ public static partial class Nilogger
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static TemplateFormatter AddFormatter(string template)
     {
-        int limit = _maxTemplateCacheEntries;
-        if (_templateCache.Count >= limit)
+        // Oversized templates are almost certainly dynamic data, not a call-site literal.
+        // Parsing them per call is correct and keeps worst-case retained memory at
+        // (MaxTemplateCacheEntries x MaxCachedTemplateLength) characters.
+        if (template.Length > _maxCachedTemplateLength)
         {
-            if (Interlocked.CompareExchange(ref _templateCacheWarned, 1, 0) == 0)
-            {
-                Debug.WriteLine(
-                    $"[Nilogger] Template cache has reached {limit} entries. " +
-                    "New templates will be parsed on each call but not cached to protect memory. " +
-                    "This typically means interpolated strings are being used as message templates " +
-                    "instead of placeholder arguments — for example, use " +
-                    "WriteInformation(\"User {Id} signed in\", userId) " +
-                    "rather than WriteInformation($\"User {userId} signed in\").");
-            }
             return new TemplateFormatter(template);
         }
 
-        TemplateFormatter formatter = _templateCache.GetOrAdd(template, static t => new TemplateFormatter(t));
-        if (_templateCache.Count > limit &&
-            Interlocked.CompareExchange(ref _templateCacheWarned, 1, 0) == 0)
+        int limit = _maxTemplateCacheEntries;
+
+        // Admission is a compare-exchange reservation on an atomic counter, so neither the counter
+        // nor the dictionary can ever exceed the limit under contention
+        // (ConcurrentDictionary.Count is not a safe gate).
+        int current;
+        do
         {
-            Debug.WriteLine(
-                $"[Nilogger] Template cache has exceeded {limit} entries. " +
-                "This typically means interpolated strings are being used as message templates " +
-                "instead of placeholder arguments — for example, use " +
-                "WriteInformation(\"User {Id} signed in\", userId) " +
-                "rather than WriteInformation($\"User {userId} signed in\").");
+            current = Volatile.Read(ref _templateCacheCount);
+            if (current >= limit)
+            {
+                if (Interlocked.CompareExchange(ref _templateCacheWarned, 1, 0) == 0)
+                {
+                    Debug.WriteLine(
+                        $"[Nilogger] Template cache has reached {limit} entries. " +
+                        "New templates will be parsed on each call but not cached to protect memory. " +
+                        "This typically means interpolated strings are being used as message templates " +
+                        "instead of placeholder arguments — for example, use " +
+                        "WriteInformation(\"User {Id} signed in\", userId) " +
+                        "rather than WriteInformation($\"User {userId} signed in\").");
+                }
+                return new TemplateFormatter(template);
+            }
         }
-        return formatter;
+        while (Interlocked.CompareExchange(ref _templateCacheCount, current + 1, current) != current);
+
+        TemplateFormatter created = new(template);
+        TemplateFormatter winner = _templateCache.GetOrAdd(template, created);
+        if (!ReferenceEquals(winner, created))
+        {
+            // Another thread cached the same template first; return the reservation.
+            Interlocked.Decrement(ref _templateCacheCount);
+        }
+
+        return winner;
+    }
+
+    /// <summary>
+    /// Gets the number of parsed templates currently held in the template cache.
+    /// </summary>
+    public static int TemplateCacheCount => Volatile.Read(ref _templateCacheCount);
+
+    /// <summary>
+    /// Removes every entry from the template cache. Subsequent calls re-parse and re-admit templates
+    /// up to <see cref="MaxTemplateCacheEntries"/>.
+    /// </summary>
+    public static void ClearTemplateCache()
+    {
+        foreach (string key in _templateCache.Keys)
+        {
+            if (_templateCache.TryRemove(key, out _))
+            {
+                Interlocked.Decrement(ref _templateCacheCount);
+            }
+        }
     }
 
     // Parses a message template once and remembers two things: the property names (so
@@ -427,6 +498,24 @@ public static partial class Nilogger
 
         private static readonly char[] _suffixChars = [',', ':'];
 
+        // Matches Microsoft.Extensions.Logging's rendering of a null argument.
+        private const string NullText = "(null)";
+
+        private static object?[] SubstituteNulls(object?[] args)
+        {
+            object?[]? copy = null;
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i] is null)
+                {
+                    copy ??= (object?[])args.Clone();
+                    copy[i] = NullText;
+                }
+            }
+
+            return copy ?? args;
+        }
+
         // Falls back to the positional index when a template has fewer names than
         // arguments, so structured sinks still get a usable key.
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -435,9 +524,11 @@ public static partial class Nilogger
             return (uint)index < (uint)Names.Length ? Names[index] : index.ToString(CultureInfo.InvariantCulture);
         }
 
-        // Logging must never throw. If the template and the supplied arguments don't
-        // line up, we hand back the raw template rather than let a FormatException
-        // bubble out of a log call.
+        // Template/argument mismatches never surface a FormatException: the raw template is
+        // returned instead (unlike Microsoft.Extensions.Logging, which throws). A throwing
+        // ToString/TryFormat on an argument is rendered inline as "[ToString failed: ...]".
+        // Provider exceptions, null-argument validation and the object[] path (rendered by
+        // MEL's FormattedLogValues) are NOT covered by this contract.
         //
         // Note: we always call string.Format even when Names is empty. The reason is that
         // _format preserves "{{" and "}}" verbatim; string.Format is what converts them to
@@ -448,36 +539,41 @@ public static partial class Nilogger
         public string Format(object a0)
         {
             try
-            { return string.Format(CultureInfo.InvariantCulture, _format, a0); }
+            { return string.Format(CultureInfo.InvariantCulture, _format, a0 ?? NullText); }
             catch (FormatException) { return Template; }
+            catch (Exception ex) when (IsRecoverable(ex)) { return FormatSanitized(new object?[] { a0 ?? NullText }); }
         }
 
         public string Format(object a0, object a1)
         {
             try
-            { return string.Format(CultureInfo.InvariantCulture, _format, a0, a1); }
+            { return string.Format(CultureInfo.InvariantCulture, _format, a0 ?? NullText, a1 ?? NullText); }
             catch (FormatException) { return Template; }
+            catch (Exception ex) when (IsRecoverable(ex)) { return FormatSanitized(new object?[] { a0 ?? NullText, a1 ?? NullText }); }
         }
 
         public string Format(object a0, object a1, object a2)
         {
             try
-            { return string.Format(CultureInfo.InvariantCulture, _format, a0, a1, a2); }
+            { return string.Format(CultureInfo.InvariantCulture, _format, a0 ?? NullText, a1 ?? NullText, a2 ?? NullText); }
             catch (FormatException) { return Template; }
+            catch (Exception ex) when (IsRecoverable(ex)) { return FormatSanitized(new object?[] { a0 ?? NullText, a1 ?? NullText, a2 ?? NullText }); }
         }
 
         public string Format(object a0, object a1, object a2, object a3)
         {
             try
-            { return string.Format(CultureInfo.InvariantCulture, _format, a0, a1, a2, a3); }
+            { return string.Format(CultureInfo.InvariantCulture, _format, a0 ?? NullText, a1 ?? NullText, a2 ?? NullText, a3 ?? NullText); }
             catch (FormatException) { return Template; }
+            catch (Exception ex) when (IsRecoverable(ex)) { return FormatSanitized(new object?[] { a0 ?? NullText, a1 ?? NullText, a2 ?? NullText, a3 ?? NullText }); }
         }
 
         public string Format(object a0, object a1, object a2, object a3, object a4)
         {
             try
-            { return string.Format(CultureInfo.InvariantCulture, _format, a0, a1, a2, a3, a4); }
+            { return string.Format(CultureInfo.InvariantCulture, _format, a0 ?? NullText, a1 ?? NullText, a2 ?? NullText, a3 ?? NullText, a4 ?? NullText); }
             catch (FormatException) { return Template; }
+            catch (Exception ex) when (IsRecoverable(ex)) { return FormatSanitized(new object?[] { a0 ?? NullText, a1 ?? NullText, a2 ?? NullText, a3 ?? NullText, a4 ?? NullText }); }
         }
 
         // Array-based fallback used by the source-generated high-arity (6+ argument) typed
@@ -488,10 +584,46 @@ public static partial class Nilogger
         public string Format(params object?[] args)
         {
             try
-            { return string.Format(CultureInfo.InvariantCulture, _format, args); }
+            { return string.Format(CultureInfo.InvariantCulture, _format, SubstituteNulls(args)); }
             catch (FormatException) { return Template; }
+            catch (Exception ex) when (IsRecoverable(ex)) { return FormatSanitized(args); }
         }
 
+        // A user-supplied ToString/ISpanFormattable/IFormattable that throws must not break the
+        // log call (F-006). Failures are rendered inline and the remaining arguments still render.
+        private static bool IsRecoverable(Exception ex) =>
+            ex is not (OutOfMemoryException or StackOverflowException or AccessViolationException or ThreadAbortException);
+
+        private static string SanitizeArg(object? value)
+        {
+            if (value is null)
+            {
+                return NullText;
+            }
+
+            try
+            {
+                return value.ToString() ?? string.Empty;
+            }
+            catch (Exception ex) when (IsRecoverable(ex))
+            {
+                return "[ToString failed: " + value.GetType().Name + " threw " + ex.GetType().Name + "]";
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private string FormatSanitized(object?[] args)
+        {
+            object?[] safe = new object?[args.Length];
+            for (int i = 0; i < args.Length; i++)
+            {
+                safe[i] = SanitizeArg(args[i]);
+            }
+
+            try
+            { return string.Format(CultureInfo.InvariantCulture, _format, safe); }
+            catch (FormatException) { return Template; }
+        }
         // Stack buffer size for the fast render path below. Generous enough for the vast
         // majority of log lines; anything larger simply falls back to Format(), so there
         // is no correctness ceiling - only a performance one.
@@ -505,12 +637,21 @@ public static partial class Nilogger
         // alignment, an argument-count mismatch, or output that overflows the stack
         // buffer) defers to the battle-tested Format() overloads above, so behaviour for
         // every existing template is unchanged.
-        // Supports up to eight arguments so the source-generated 6-8 arg overloads render
-        // through the same allocation-free span path as the hand-written 1-5 arg ones,
-        // instead of building an object?[] in ToString(). Arguments 6-8 default to null so
-        // every existing 1-5 arg caller is unaffected.
-        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+        // Supports up to eight arguments, so the source-generated 6-8 arg overloads render
+        // through the same allocation-free span path as the hand-written 1-5 arg ones.
+        // The generated 9-16 arg overloads use the array-based Format(params object?[]) path.
+        // Arguments 6-8 default to null so every 1-5 arg caller is unaffected.
         public string Render(int argCount, object? a0, object? a1 = null, object? a2 = null, object? a3 = null, object? a4 = null,
+            object? a5 = null, object? a6 = null, object? a7 = null)
+        {
+            try
+            { return RenderCore(argCount, a0, a1, a2, a3, a4, a5, a6, a7); }
+            catch (Exception ex) when (IsRecoverable(ex))
+            { return FormatSanitized(argCount switch { 1 => new[] { a0 }, 2 => new[] { a0, a1 }, 3 => new[] { a0, a1, a2 }, 4 => new[] { a0, a1, a2, a3 }, 5 => new[] { a0, a1, a2, a3, a4 }, 6 => new[] { a0, a1, a2, a3, a4, a5 }, 7 => new[] { a0, a1, a2, a3, a4, a5, a6 }, _ => new[] { a0, a1, a2, a3, a4, a5, a6, a7 } }); }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+        private string RenderCore(int argCount, object? a0, object? a1 = null, object? a2 = null, object? a3 = null, object? a4 = null,
             object? a5 = null, object? a6 = null, object? a7 = null)
         {
             if (_hasFormatSpecifiers || _maxArgIndex >= argCount)
@@ -541,7 +682,7 @@ public static partial class Nilogger
 
         // Slow path shared by Render: templates with format specifiers/alignment, an
         // argument-count mismatch, or stack-buffer overflow defer to string.Format. Only the
-        // 6-8 arg cases build an object?[]; the common 1-5 plain-template path never reaches
+        // 6+ arg cases build an object?[]; the common 1-5 plain-template path never reaches
         // here. NoInlining keeps it off Render's hot path.
         [MethodImpl(MethodImplOptions.NoInlining)]
         private string FormatFallback(int argCount, object? a0, object? a1, object? a2, object? a3, object? a4, object? a5, object? a6, object? a7)
@@ -575,11 +716,10 @@ public static partial class Nilogger
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static bool TryWriteValue(object? value, Span<char> buffer, ref int pos)
         {
-            // string.Format renders a null argument as an empty string - match that
-            // exactly so the fast path is indistinguishable from the fallback.
+            // Null renders as "(null)" - the Microsoft.Extensions.Logging convention - on every path.
             if (value is null)
             {
-                return true;
+                return TryWriteLiteral(NullText, buffer, ref pos);
             }
 
             if (value is ISpanFormattable formattable)
@@ -951,6 +1091,7 @@ public static partial class Nilogger
             return;
         }
 
+        if (arg0 is Exception ex0) { LogNoArgs(logger, level, message, ex0); return; }
         Emit(logger, level, null!, message, arg0);
     }
 
@@ -975,6 +1116,7 @@ public static partial class Nilogger
             return;
         }
 
+        if (arg0 is Exception ex0) { Emit(logger, level, ex0, message, arg1); return; }
         Emit(logger, level, null!, message, arg0, arg1);
     }
 
@@ -1001,6 +1143,7 @@ public static partial class Nilogger
             return;
         }
 
+        if (arg0 is Exception ex0) { Emit(logger, level, ex0, message, arg1, arg2); return; }
         Emit(logger, level, null!, message, arg0, arg1, arg2);
     }
 
@@ -1029,6 +1172,7 @@ public static partial class Nilogger
             return;
         }
 
+        if (arg0 is Exception ex0) { Emit(logger, level, ex0, message, arg1, arg2, arg3); return; }
         Emit(logger, level, null!, message, arg0, arg1, arg2, arg3);
     }
 
@@ -1067,6 +1211,7 @@ public static partial class Nilogger
             return;
         }
 
+        if (arg0 is Exception ex0) { Emit(logger, level, ex0, message, arg1, arg2, arg3, arg4); return; }
         Emit(logger, level, null!, message, arg0, arg1, arg2, arg3, arg4);
     }
 
@@ -1164,6 +1309,22 @@ public static partial class Nilogger
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public static void Log(ILogger logger, LogLevel level, string message, params object[] args)
     {
+        // An object-typed leading Exception (e.g. a boxed catch variable) is attached, not
+        // rendered as a value - the same rule the typed overloads apply.
+        if (args is { Length: > 0 } && args[0] is Exception leading)
+        {
+            ArgumentNullException.ThrowIfNull(logger);
+            if (!logger.IsEnabled(level))
+            {
+                return;
+            }
+
+            object[] rest = new object[args.Length - 1];
+            Array.Copy(args, 1, rest, 0, rest.Length);
+            Log(logger, level, message, leading, rest);
+            return;
+        }
+
         Log(logger, level, message, null!, args);
     }
 
@@ -2128,6 +2289,7 @@ public static partial class Nilogger
         ArgumentNullException.ThrowIfNull(message);
         if (!logger.IsEnabled(LogLevel.Error))
         { return; }
+        if (arg0 is Exception ex0) { LogNoArgs(logger, LogLevel.Error, message, ex0); return; }
         Emit(logger, LogLevel.Error, null!, message, arg0);
     }
 
@@ -2149,6 +2311,7 @@ public static partial class Nilogger
         ArgumentNullException.ThrowIfNull(message);
         if (!logger.IsEnabled(LogLevel.Error))
         { return; }
+        if (arg0 is Exception ex0) { Emit(logger, LogLevel.Error, ex0, message, arg1); return; }
         Emit(logger, LogLevel.Error, null!, message, arg0, arg1);
     }
 
@@ -2172,6 +2335,7 @@ public static partial class Nilogger
         ArgumentNullException.ThrowIfNull(message);
         if (!logger.IsEnabled(LogLevel.Error))
         { return; }
+        if (arg0 is Exception ex0) { Emit(logger, LogLevel.Error, ex0, message, arg1, arg2); return; }
         Emit(logger, LogLevel.Error, null!, message, arg0, arg1, arg2);
     }
 
@@ -2197,6 +2361,7 @@ public static partial class Nilogger
         ArgumentNullException.ThrowIfNull(message);
         if (!logger.IsEnabled(LogLevel.Error))
         { return; }
+        if (arg0 is Exception ex0) { Emit(logger, LogLevel.Error, ex0, message, arg1, arg2, arg3); return; }
         Emit(logger, LogLevel.Error, null!, message, arg0, arg1, arg2, arg3);
     }
 
@@ -2224,6 +2389,7 @@ public static partial class Nilogger
         ArgumentNullException.ThrowIfNull(message);
         if (!logger.IsEnabled(LogLevel.Error))
         { return; }
+        if (arg0 is Exception ex0) { Emit(logger, LogLevel.Error, ex0, message, arg1, arg2, arg3, arg4); return; }
         Emit(logger, LogLevel.Error, null!, message, arg0, arg1, arg2, arg3, arg4);
     }
 
@@ -2243,6 +2409,7 @@ public static partial class Nilogger
         ArgumentNullException.ThrowIfNull(message);
         if (!logger.IsEnabled(LogLevel.Critical))
         { return; }
+        if (arg0 is Exception ex0) { LogNoArgs(logger, LogLevel.Critical, message, ex0); return; }
         Emit(logger, LogLevel.Critical, null!, message, arg0);
     }
 
@@ -2264,6 +2431,7 @@ public static partial class Nilogger
         ArgumentNullException.ThrowIfNull(message);
         if (!logger.IsEnabled(LogLevel.Critical))
         { return; }
+        if (arg0 is Exception ex0) { Emit(logger, LogLevel.Critical, ex0, message, arg1); return; }
         Emit(logger, LogLevel.Critical, null!, message, arg0, arg1);
     }
 
@@ -2287,6 +2455,7 @@ public static partial class Nilogger
         ArgumentNullException.ThrowIfNull(message);
         if (!logger.IsEnabled(LogLevel.Critical))
         { return; }
+        if (arg0 is Exception ex0) { Emit(logger, LogLevel.Critical, ex0, message, arg1, arg2); return; }
         Emit(logger, LogLevel.Critical, null!, message, arg0, arg1, arg2);
     }
 
@@ -2312,6 +2481,7 @@ public static partial class Nilogger
         ArgumentNullException.ThrowIfNull(message);
         if (!logger.IsEnabled(LogLevel.Critical))
         { return; }
+        if (arg0 is Exception ex0) { Emit(logger, LogLevel.Critical, ex0, message, arg1, arg2, arg3); return; }
         Emit(logger, LogLevel.Critical, null!, message, arg0, arg1, arg2, arg3);
     }
 
@@ -2339,6 +2509,7 @@ public static partial class Nilogger
         ArgumentNullException.ThrowIfNull(message);
         if (!logger.IsEnabled(LogLevel.Critical))
         { return; }
+        if (arg0 is Exception ex0) { Emit(logger, LogLevel.Critical, ex0, message, arg1, arg2, arg3, arg4); return; }
         Emit(logger, LogLevel.Critical, null!, message, arg0, arg1, arg2, arg3, arg4);
     }
 
@@ -2365,7 +2536,7 @@ public static partial class Nilogger
             return;
         }
 
-        string msg = _exceptionFormatter(ex, title, moreDetailsEnabled);
+        string msg = FormatExceptionSafe(ex, title, moreDetailsEnabled);
         LogNoArgs(logger, LogLevel.Error, msg, ex);
     }
 
@@ -2388,8 +2559,99 @@ public static partial class Nilogger
             return;
         }
 
-        string msg = _exceptionFormatter(ex, title, moreDetailsEnabled);
+        string msg = FormatExceptionSafe(ex, title, moreDetailsEnabled);
         LogNoArgs(logger, LogLevel.Critical, msg, ex);
+    }
+
+    // Exception-report contract (see also ExceptionFormatter):
+    //  * Compact report: one line; CR/LF in title/message are flattened to spaces so a hostile
+    //    message cannot forge extra log lines. Message is capped at MaxExceptionMessageChars.
+    //  * Verbose report: multi-line; the top-level exception, then inner exceptions to
+    //    MaxInnerExceptionDepth levels. AggregateException (top level or nested) lists every
+    //    inner exception, bounded by MaxExceptionReportNodes. The whole report is capped at
+    //    MaxExceptionReportChars. Any depth/node/size truncation is stated in the report.
+    //  * Exception.Data is intentionally NOT rendered (it commonly carries sensitive values);
+    //    the exception object itself is still forwarded to the provider. Redaction of message
+    //    text and Data is the caller's / sink's responsibility.
+    //  * Throwing Message/Source/StackTrace getters on hostile exceptions are reported inline
+    //    as "[X unavailable: ExceptionType]" rather than aborting the log call.
+    private const int MaxExceptionMessageChars = 4096;
+    private const int MaxExceptionReportChars = 32 * 1024;
+    private const int MaxInnerExceptionDepth = 3;
+    private const int MaxExceptionReportNodes = 32;
+
+    private static string SafeMessage(Exception ex)
+    {
+        try
+        {
+            string? m = ex.Message;
+            if (m is null)
+            {
+                return "N/A";
+            }
+
+            if (m.Length > MaxExceptionMessageChars)
+            {
+                return string.Concat(m.AsSpan(0, MaxExceptionMessageChars).Trim(), "…[truncated ", (m.Length - MaxExceptionMessageChars).ToString(CultureInfo.InvariantCulture), " chars]");
+            }
+
+            return m.Trim();
+        }
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            return "[Message unavailable: " + e.GetType().Name + "]";
+        }
+    }
+
+    private static string SafeSource(Exception ex)
+    {
+        try
+        {
+            return ex.Source ?? "N/A";
+        }
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            return "[Source unavailable: " + e.GetType().Name + "]";
+        }
+    }
+
+    private static string? SafeStackTrace(Exception ex)
+    {
+        try
+        {
+            return ex.StackTrace;
+        }
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            return "[StackTrace unavailable: " + e.GetType().Name + "]";
+        }
+    }
+
+    private static string FlattenLines(string s)
+    {
+        return s.AsSpan().IndexOfAny('\r', '\n') < 0 ? s : s.Replace("\r\n", " ", StringComparison.Ordinal).Replace('\r', ' ').Replace('\n', ' ');
+    }
+
+    // Runs the configured formatter. A failing user formatter must not turn a log call into an
+    // application exception, so fall back to the built-in report and say why.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static string FormatExceptionSafe(Exception ex, string title, bool moreDetailsEnabled)
+    {
+        try
+        {
+            string? custom = _exceptionFormatter(ex, title, moreDetailsEnabled);
+            if (custom is not null)
+            {
+                return custom;
+            }
+        }
+        catch (Exception fe) when (fe is not OutOfMemoryException)
+        {
+            Debug.WriteLine($"Nilogger.ExceptionFormatter threw {fe.GetType().Name}; using the built-in report.");
+            return "[ExceptionFormatter failed: " + fe.GetType().Name + "] " + FormatExceptionMessageInternal(ex, title, moreDetailsEnabled);
+        }
+
+        return FormatExceptionMessageInternal(ex, title, moreDetailsEnabled);
     }
 
     // The default exception renderer.
@@ -2411,9 +2673,9 @@ public static partial class Nilogger
             // Typical output: "[System Error] System.InvalidOperationException: msg (Source=N/A, HResult=-2147467261)"
             // ~80-120 chars = ~190-264 B — well under the 300 B target.
             string typeName = exType.FullName ?? exType.Name;
-            string message = ex.Message?.Trim() ?? "N/A";
-            string source = ex.Source ?? "N/A";
-            return $"[{title ?? "N/A"}] {typeName}: {message} (Source={source}, HResult={ex.HResult})";
+            string message = FlattenLines(SafeMessage(ex));
+            string source = FlattenLines(SafeSource(ex));
+            return $"[{FlattenLines(title ?? "N/A")}] {typeName}: {message} (Source={source}, HResult={ex.HResult})";
         }
 
         // Verbose multi-line format for detailed cold-path reporting.
@@ -2427,20 +2689,41 @@ public static partial class Nilogger
             _ = sb.Append("Timestamp      : ").AppendLine(GetCachedUtc())
                 .Append("Title          : ").AppendLine(title ?? "N/A")
                 .Append("Exception Type : ").AppendLine(exType.FullName ?? exType.Name)
-                .Append("Message        : ").AppendLine(ex.Message?.Trim() ?? "N/A")
+                .Append("Message        : ").AppendLine(SafeMessage(ex))
                 .Append("HResult        : ").Append(ex.HResult).AppendLine()
-                .Append("Source         : ").AppendLine(ex.Source ?? "N/A");
+                .Append("Source         : ").AppendLine(SafeSource(ex));
 
-            string? st = ex.StackTrace;
+            string? st = SafeStackTrace(ex);
             if (!string.IsNullOrWhiteSpace(st))
             {
                 _ = sb.AppendLine().AppendLine("Stack Trace    :").AppendLine(st.Trim());
             }
 
-            if (ex.InnerException is not null)
+            int nodes = 1;
+            if (ex is AggregateException topAgg && topAgg.InnerExceptions.Count > 0)
             {
                 _ = sb.AppendLine().AppendLine("---- Inner Exceptions ----");
-                AppendInnerExceptionDetails(sb, ex.InnerException, 1, maxDepth: 3);
+                for (int i = 0; i < topAgg.InnerExceptions.Count; i++)
+                {
+                    if (i > 0)
+                    {
+                        _ = sb.AppendLine();
+                    }
+
+                    AppendInnerExceptionDetails(sb, topAgg.InnerExceptions[i], 1, ref nodes);
+                }
+            }
+            else if (ex.InnerException is not null)
+            {
+                _ = sb.AppendLine().AppendLine("---- Inner Exceptions ----");
+                AppendInnerExceptionDetails(sb, ex.InnerException, 1, ref nodes);
+            }
+
+            if (sb.Length > MaxExceptionReportChars)
+            {
+                int dropped = sb.Length - MaxExceptionReportChars;
+                sb.Length = MaxExceptionReportChars;
+                _ = sb.AppendLine().Append("[report truncated: ").Append(dropped).AppendLine(" chars omitted]");
             }
 
             return sb.ToString();
@@ -2463,22 +2746,29 @@ public static partial class Nilogger
     // Walks the inner-exception chain (and AggregateException branches) up to maxDepth,
     // indenting each level with '>' so the nesting is readable in plain-text sinks.
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void AppendInnerExceptionDetails(StringBuilder sb, Exception inner, int depth, int maxDepth = 5)
+    private static void AppendInnerExceptionDetails(StringBuilder sb, Exception inner, int depth, ref int nodes)
     {
-        if (inner is null || depth > maxDepth)
+        if (inner is null)
         {
             return;
         }
 
         string indent = GetIndent(depth);
+        if (depth > MaxInnerExceptionDepth || nodes >= MaxExceptionReportNodes || sb.Length > MaxExceptionReportChars)
+        {
+            _ = sb.Append(indent).AppendLine(" [further inner exceptions omitted: depth/size limit reached]");
+            return;
+        }
+
+        nodes++;
         Type innerType = inner.GetType();
         _ = sb.Append(indent).Append(" Exception Type : ").AppendLine(innerType.FullName ?? innerType.Name)
-            .Append(indent).Append(" Message        : ").AppendLine(inner.Message?.Trim() ?? "N/A")
+            .Append(indent).Append(" Message        : ").AppendLine(SafeMessage(inner))
             .Append(indent).Append(" HResult        : ").Append(inner.HResult).AppendLine()
-            .Append(indent).Append(" Source         : ").AppendLine(inner.Source ?? "N/A");
+            .Append(indent).Append(" Source         : ").AppendLine(SafeSource(inner));
         // TargetSite omitted for trim/AOT safety (see FormatExceptionMessageInternal).
 
-        string? st = inner.StackTrace;
+        string? st = SafeStackTrace(inner);
         if (!string.IsNullOrWhiteSpace(st))
         {
             _ = sb.Append(indent).AppendLine(" Stack Trace    :").AppendLine(st.Trim());
@@ -2490,13 +2780,13 @@ public static partial class Nilogger
             for (int i = 0; i < agg.InnerExceptions.Count; i++)
             {
                 _ = sb.AppendLine();
-                AppendInnerExceptionDetails(sb, agg.InnerExceptions[i], depth + 1, maxDepth);
+                AppendInnerExceptionDetails(sb, agg.InnerExceptions[i], depth + 1, ref nodes);
             }
         }
         else if (inner.InnerException is not null)
         {
             _ = sb.AppendLine();
-            AppendInnerExceptionDetails(sb, inner.InnerException, depth + 1, maxDepth);
+            AppendInnerExceptionDetails(sb, inner.InnerException, depth + 1, ref nodes);
         }
     }
 
@@ -2585,6 +2875,7 @@ public static partial class Nilogger
     /// <param name="context">The properties to attach. <see langword="null"/> or empty returns a no-op scope.</param>
     /// <returns>An <see cref="IDisposable"/> that ends the scope when disposed; use it with <c>using</c>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="logger"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">A key in <paramref name="context"/> is <see langword="null"/> or whitespace (consistent with the single/typed overloads). Duplicate keys are passed to the provider unchanged.</exception>
     /// <remarks>
     /// Small contexts (four entries or fewer) are stored in a pre-sized array to avoid
     /// the overhead of a list; larger ones fall back to a list. Either way the values are
@@ -2600,29 +2891,88 @@ public static partial class Nilogger
             return NullScope.Instance;
         }
 
-        if (context.Count <= 4)
+        return BeginCopiedScope(logger, context, context.Count);
+    }
+
+    // Validates a scope key the same way the single/typed overloads do.
+    private static void ValidateScopeKey(string? key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
         {
-            KeyValuePair<string, object>[] items = new KeyValuePair<string, object>[context.Count];
+            throw new ArgumentException("Scope keys cannot be null or whitespace.", nameof(key));
+        }
+    }
+
+    // Copies the pairs once, validating each key. The count is only a sizing hint: a collection
+    // whose Count disagrees with its enumeration (or that is mutated concurrently) is handled
+    // without IndexOutOfRange or default entries. Enumerator exceptions propagate and no scope
+    // is opened. Duplicate keys are passed through unchanged for the provider to interpret.
+    private static IDisposable BeginCopiedScope(ILogger logger, IEnumerable<KeyValuePair<string, object>> context, int hint)
+    {
+        if (hint is > 0 and <= 4)
+        {
+            KeyValuePair<string, object>[] items = new KeyValuePair<string, object>[hint];
             int i = 0;
+            List<KeyValuePair<string, object>>? overflow = null;
             foreach (KeyValuePair<string, object> kv in context)
             {
-                items[i++] = new KeyValuePair<string, object>(kv.Key, kv.Value ?? "N/A");
+                ValidateScopeKey(kv.Key);
+                KeyValuePair<string, object> copy = new(kv.Key, kv.Value ?? "N/A");
+                if (i < items.Length)
+                {
+                    items[i++] = copy;
+                }
+                else
+                {
+                    overflow ??= [.. items];
+                    overflow.Add(copy);
+                }
+            }
+
+            if (overflow is not null)
+            {
+                return BeginListScope(logger, overflow);
+            }
+
+            if (i == 0)
+            {
+                return NullScope.Instance;
+            }
+
+            if (i < items.Length)
+            {
+                Array.Resize(ref items, i);
             }
 
             SmallScopeWrapper wrapper = new(items);
             return logger.BeginScope(wrapper) ?? new DisposableScope(wrapper);
         }
-        else
-        {
-            List<KeyValuePair<string, object>> safe = new(context.Count);
-            foreach (KeyValuePair<string, object> kv in context)
-            {
-                safe.Add(new KeyValuePair<string, object>(kv.Key, kv.Value ?? "N/A"));
-            }
 
-            ScopeWrapper wrapper = new(safe);
-            return logger.BeginScope(wrapper) ?? new DisposableScope(wrapper);
+        List<KeyValuePair<string, object>> safe = hint > 0 ? new(hint) : [];
+        foreach (KeyValuePair<string, object> kv in context)
+        {
+            ValidateScopeKey(kv.Key);
+            safe.Add(new KeyValuePair<string, object>(kv.Key, kv.Value ?? "N/A"));
         }
+
+        return BeginListScope(logger, safe);
+    }
+
+    private static IDisposable BeginListScope(ILogger logger, List<KeyValuePair<string, object>> safe)
+    {
+        if (safe.Count == 0)
+        {
+            return NullScope.Instance;
+        }
+
+        if (safe.Count <= 4)
+        {
+            SmallScopeWrapper small = new([.. safe]);
+            return logger.BeginScope(small) ?? new DisposableScope(small);
+        }
+
+        ScopeWrapper wrapper = new(safe);
+        return logger.BeginScope(wrapper) ?? new DisposableScope(wrapper);
     }
 
     /// <summary>
@@ -2634,6 +2984,7 @@ public static partial class Nilogger
     /// <param name="context">The key/value pairs to attach. <see langword="null"/> or empty returns a no-op scope.</param>
     /// <returns>An <see cref="IDisposable"/> that ends the scope when disposed; use it with <c>using</c>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="logger"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">A key is <see langword="null"/> or whitespace. An exception thrown by the sequence's enumerator propagates and no scope is opened.</exception>
     /// <remarks>
     /// <para>
     /// C# overload resolution prefers <see cref="WriteScope(ILogger, IDictionary{string, object})"/> for
@@ -2669,43 +3020,7 @@ public static partial class Nilogger
             return NullScope.Instance;
         }
 
-        // When count is known and small, allocate exactly the right array up front —
-        // same allocation profile as the IDictionary overload.
-        if (knownCount is > 0 and <= 4)
-        {
-            KeyValuePair<string, object>[] items = new KeyValuePair<string, object>[knownCount];
-            int i = 0;
-            foreach (KeyValuePair<string, object> kv in context)
-            {
-                items[i++] = new KeyValuePair<string, object>(kv.Key, kv.Value ?? "N/A");
-            }
-
-            SmallScopeWrapper wrapper = new(items);
-            return logger.BeginScope(wrapper) ?? new DisposableScope(wrapper);
-        }
-        else
-        {
-            // Count unknown or > 4: enumerate once into a list, then pick the wrapper.
-            List<KeyValuePair<string, object>> safe = knownCount > 0 ? new(knownCount) : [];
-            foreach (KeyValuePair<string, object> kv in context)
-            {
-                safe.Add(new KeyValuePair<string, object>(kv.Key, kv.Value ?? "N/A"));
-            }
-
-            if (safe.Count == 0)
-            {
-                return NullScope.Instance;
-            }
-
-            if (safe.Count <= 4)
-            {
-                SmallScopeWrapper wrapper = new([.. safe]);
-                return logger.BeginScope(wrapper) ?? new DisposableScope(wrapper);
-            }
-
-            ScopeWrapper wrapper2 = new(safe);
-            return logger.BeginScope(wrapper2) ?? new DisposableScope(wrapper2);
-        }
+        return BeginCopiedScope(logger, context, knownCount);
     }
 
     // Single-pair scope state. A readonly struct with a hand-written enumerator so that
@@ -3010,7 +3325,8 @@ public static partial class Nilogger
         }
 
         public int Count => _items.Length;
-        public KeyValuePair<string, object> this[int index] => _items[index];
+        public KeyValuePair<string, object> this[int index] =>
+            (uint)index < (uint)_items.Length ? _items[index] : throw new ArgumentOutOfRangeException(nameof(index));
 
         [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
         public Enumerator GetEnumerator()
@@ -3222,9 +3538,21 @@ public static partial class Nilogger
     /// preserving the original no-op behaviour.
     /// </returns>
     /// <remarks>
-    /// Every callback is attempted even if an earlier one faults; any exceptions are surfaced
-    /// together as an <see cref="AggregateException"/> so a single bad sink never silently
-    /// swallows the rest of the flush.
+    /// Contract:
+    /// <list type="bullet">
+    /// <item>Callbacks run sequentially in registration order; a callback registered twice runs twice.</item>
+    /// <item>Every callback is attempted even if an earlier one throws synchronously, faults, or is canceled on its own
+    /// (an <see cref="OperationCanceledException"/> while <paramref name="cancellationToken"/> is not canceled is treated as that
+    /// callback's failure). Failures are surfaced together as an <see cref="AggregateException"/>.</item>
+    /// <item>A <see langword="null"/> returned task is treated as an immediately completed callback.</item>
+    /// <item>When <paramref name="cancellationToken"/> is canceled, the wait on the running callback is abandoned promptly
+    /// even if the callback ignores the token, and remaining callbacks are not started. Failures already observed are never
+    /// discarded: the result is an <see cref="AggregateException"/> containing them plus the
+    /// <see cref="OperationCanceledException"/>; with no prior failures the task is canceled.</item>
+    /// <item>A non-cooperative callback cannot be forcibly stopped; after cancellation it continues in the background
+    /// and any later fault is observed (never raised as an unobserved task exception).</item>
+    /// <item>Only registered callbacks are flushed; Nilog cannot flush arbitrary downstream <see cref="ILoggerProvider"/> instances.</item>
+    /// </list>
     /// </remarks>
     public static Task FlushAsync(CancellationToken cancellationToken = default)
     {
@@ -3236,18 +3564,40 @@ public static partial class Nilogger
     private static async Task FlushAllAsync(Func<CancellationToken, Task>[] callbacks, CancellationToken cancellationToken)
     {
         List<Exception>? errors = null;
+        OperationCanceledException? canceled = null;
         for (int i = 0; i < callbacks.Length; i++)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            if (cancellationToken.IsCancellationRequested)
+            {
+                canceled = new OperationCanceledException(cancellationToken);
+                break;
+            }
+
+            Task? task = null;
             try
             {
-                Task task = callbacks[i](cancellationToken);
+                task = callbacks[i](cancellationToken);
                 if (task is not null)
                 {
-                    await task.ConfigureAwait(false);
+                    await task.WaitAsync(cancellationToken).ConfigureAwait(false);
                 }
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (OperationCanceledException oce) when (cancellationToken.IsCancellationRequested)
+            {
+                canceled = oce;
+                if (task is { IsCompleted: false })
+                {
+                    // The callback ignored the token: stop waiting, but observe its eventual fault.
+                    _ = task.ContinueWith(
+                        static t => _ = t.Exception,
+                        CancellationToken.None,
+                        TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                        TaskScheduler.Default);
+                }
+
+                break;
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 (errors ??= []).Add(ex);
             }
@@ -3255,7 +3605,17 @@ public static partial class Nilogger
 
         if (errors is not null)
         {
+            if (canceled is not null)
+            {
+                errors.Add(canceled);
+            }
+
             throw new AggregateException("One or more Nilog flush callbacks failed.", errors);
+        }
+
+        if (canceled is not null)
+        {
+            throw canceled;
         }
     }
 

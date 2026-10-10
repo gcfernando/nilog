@@ -12,6 +12,7 @@
 		<AnalysisLevel>latest</AnalysisLevel>
 		<EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
 		<Deterministic>true</Deterministic>
+		<RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
 
 		<Authors>Gehan Fernando</Authors>
 		<Company>Gehan Fernando</Company>

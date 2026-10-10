@@ -553,7 +553,16 @@ public class FlushBenchmarks
 // 12. PARALLEL THROUGHPUT — all cores writing concurrently
 // ---------------------------------------------------------------------------
 
-/// <summary>Throughput under contention: all cores logging at once.</summary>
+/// <summary>
+/// Throughput under contention: all cores logging at once.
+/// <para>
+/// Interpret the allocation column with care: it includes <c>Parallel.For</c>'s own scheduling
+/// allocations and is not a per-call logging figure. For a process-wide, control-subtracted
+/// bytes-per-call measurement on dedicated threads use
+/// <c>dotnet run -c Release --project Nilog.Benchmark -- --parallel-alloc</c>
+/// (see <c>ParallelAllocationProbe</c>).
+/// </para>
+/// </summary>
 [MemoryDiagnoser]
 public class ParallelBenchmarks
 {

@@ -9,6 +9,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Nothing yet._
 
+## [1.0.6] - 2026-10-08
+
+Audit-remediation release. Every item below is covered by a regression test or an external
+harness; the core suite (252 tests) and analyzer suite (66 tests) pass on net8.0, net9.0 and net10.0.
+
+### 🐛 Fixed
+
+- **F-001** `WriteError`/`WriteCritical`/`Log` with a derived exception type or extra arguments
+  on C# ≤ 12 bound to the generic overload and lost the exception. Runtime and generated
+  overloads now attach a leading `Exception`. Verified in a 6-configuration consumer matrix.
+- **F-004 / F-005** `NILOG001` code fix: arguments are inserted in the correct position (after the
+  exception argument where present), brace escaping no longer doubles braces, and the fix is
+  withheld where it cannot be proven semantics-preserving.
+- **F-006** A throwing `ToString()`/`ISpanFormattable` on a typed argument no longer escapes the
+  log call; it renders as `[ToString failed: Type threw Ex]`.
+- **F-007** `FlushAsync` honours cancellation, preserves earlier failures in an `AggregateException`
+  and observes abandoned callbacks.
+- **F-008** The template cache is bounded by entry count and by template length. New public API:
+  `MaxCachedTemplateLength`, `TemplateCacheCount`, `ClearTemplateCache()`.
+- **F-009** Exception reports are bounded (message, depth, node and total length), single-line in
+  compact mode, list all `AggregateException` inners, and a throwing user `ExceptionFormatter`
+  falls back to the built-in report.
+- **F-010** Dictionary/`IEnumerable` scopes validate keys (`ArgumentException` for null/blank) and
+  treat `Count` as a hint only.
+- **F-013** Null arguments render as `(null)`, matching Microsoft.Extensions.Logging.
+- `SmallScopeWrapper` indexer threw `IndexOutOfRangeException` for an out-of-range index; it now throws `ArgumentOutOfRangeException` (found by coverage analysis).
+
+### 📚 Documentation
+
+- Benchmark tables replaced with v1.0.6 measurements against conventional MEL extensions, `LoggerMessage.Define` and `[LoggerMessage]`; the earlier "240x faster" style comparisons (conventional extension only) are retired. Nilog is equal to the optimized APIs on the disabled path and not faster on the enabled path.
+- Removed the unsupported "full parity with SerilogAnalyzer" claim from the README, NuGet readme and analyzer package description.
+- **F-003** The v1.0.5 "0 B under parallel load" claim could not be reproduced and is withdrawn.
+  Re-measured: BenchmarkDotNet MediumRun 3.82 MB (Nilog) vs 5.34 MB (Microsoft); process-wide probe
+  80 B vs 112 B per 1-arg call. The enabled path allocates the rendered string.
+- **F-002** Documented that statically `object`-typed arguments bind to `params` and allocate.
+- **F-011 / F-014** Replaced "never throws" and "immutable static state" wording; documented the
+  raw-template fallback (Nilog) versus `FormatException` (MEL) and the `object[]`-path ownership.
+
+### 🧪 Tests & tooling
+
+- New regression suites (exception binding, cache bounds, flush, exception report, formatting
+  robustness, scope validation, allocation characterization, code-fix behaviour).
+- `Nilog.Benchmark --parallel-alloc` process-wide allocation probe.
+- Coverage-gap tests (high-arity states, scope wrappers) and additional NILOG002 analyzer cases; `NILOG002` description corrected for the `params`/MEL path.
+- Line coverage measured at 51% (branch 45%) before the gap tests; see the Phase 2 coverage report.
+
+### 🔒 CI / supply chain (F-012)
+
+- Actions pinned to commit SHAs, read-only default permissions, tag/version values passed via
+  environment variables and validated, analyzer tests added to CI.
+- Added `global.json`, NuGet lock files (`--locked-mode` in CI/release), `SECURITY.md` and a CycloneDX SBOM procedure; removed a duplicated nested workflow directory.
+- `dotnet list package --vulnerable --include-transitive`: 0 advisories in all projects.
+- Not done: package signing and provenance attestation (require credentials; nothing was published).
+
+### 📦 Version
+
+- Package and analyzer version bumped to 1.0.6.
+
 ## [1.0.5] - 2026-10-07
 
 This is a hardening/audit release: no new public APIs, no behavioural redesign. It re-validates

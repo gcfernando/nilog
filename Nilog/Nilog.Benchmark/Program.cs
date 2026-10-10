@@ -14,6 +14,7 @@
 // BenchmarkDotNet requires a Release build; a Debug run only prints a warning.
 
 using BenchmarkDotNet.Running;
+using Nilog.Benchmark;
 
 // Benchmarks must not run with an attached debugger — measurements are unreliable.
 if (System.Diagnostics.Debugger.IsAttached)
@@ -21,4 +22,8 @@ if (System.Diagnostics.Debugger.IsAttached)
         "Benchmarks must not run with an attached debugger. " +
         "Run with: dotnet run -c Release --project Nilog.Benchmark -- --filter \"*\" --join");
 
+if (args.Length > 0 && args[0] == "--parallel-alloc")
+    return ParallelAllocationProbe.Run(args);
+
 BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
+return 0;

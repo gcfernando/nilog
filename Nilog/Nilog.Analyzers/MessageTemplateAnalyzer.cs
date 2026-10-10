@@ -46,8 +46,10 @@ public sealed class MessageTemplateAnalyzer : DiagnosticAnalyzer
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         description: "Nilog (like Microsoft.Extensions.Logging) maps template placeholders to arguments by " +
-                     "position. When the counts differ, string.Format throws internally, Nilog falls back to the " +
-                     "un-rendered template, and the structured properties are wrong or missing. Make the number " +
+                     "position. When the counts differ, Nilog's typed overloads fall back to the " +
+                     "un-rendered template (structured properties are wrong or missing); calls that bind to " +
+                     "the params object[] overloads are rendered by Microsoft.Extensions.Logging, which may " +
+                     "throw a FormatException. Make the number " +
                      "of '{Name}' placeholders match the number of arguments passed.");
 
     private static readonly DiagnosticDescriptor DynamicTemplateRule = new(

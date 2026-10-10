@@ -119,7 +119,39 @@ public class TemplateTests
 
         logger.WriteInformation("Name={Name}", (string?)null);
 
-        Assert.Equal("Name=", logger.Single.Message);
+        Assert.Equal("Name=(null)", logger.Single.Message);
+    }
+
+    [Fact]
+    public void NullRendering_IsConsistentAcrossPaths_F013()
+    {
+        TestLogger logger = new();
+
+        logger.WriteInformation("A={A}", (string?)null);
+        logger.WriteInformation("A={A} B={B}", (string?)null, 5);
+        logger.WriteInformation("A={A}", (int?)null);
+        logger.WriteInformation("A={A:N2}", (double?)null);
+        logger.WriteInformation("A={A,5}", (string?)null);
+        logger.WriteInformation("A={A}", new object?[] { null });
+        logger.WriteInformation("1={a} 2={b} 3={c} 4={d} 5={e} 6={f} 7={g}", 1, 2, 3, 4, 5, 6, (string?)null);
+
+        string[] expected =
+        [
+            "A=(null)", "A=(null) B=5", "A=(null)", "A=(null)", "A=(null)", "A=(null)",
+            "1=1 2=2 3=3 4=4 5=5 6=6 7=(null)",
+        ];
+        Assert.Equal(expected, logger.Entries.Select(e => e.Message).ToArray());
+    }
+
+    [Fact]
+    public void NullParamsArray_IsNotMutated_F013()
+    {
+        TestLogger logger = new();
+        object?[] args = [null, 1];
+
+        logger.WriteInformation("{A} {B}", args);
+
+        Assert.Null(args[0]);
     }
 
     // Feature B: cache-guard smoke test. Verifies that many distinct templates are cached
