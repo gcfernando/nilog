@@ -695,6 +695,66 @@ using var loggerFactory = LoggerFactory.Create(builder =>
 }
 ```
 
+### 📁 Configuration files and hosts
+
+Nilog does not define a configuration section or read configuration files itself. It uses the
+`ILogger` supplied by your host, so configure that host's
+`Microsoft.Extensions.Logging` pipeline:
+
+| Where | Supported? | How it affects Nilog |
+| --- | :---: | --- |
+| C# startup code (`Program.cs`) | Yes | Configure `builder.Logging` or `LoggerFactory` with levels, filters, and providers. |
+| `appsettings.json` / `appsettings.{Environment}.json` | Yes | Use the standard `Logging:LogLevel` section when the host loads JSON configuration. |
+| Azure Functions `host.json` | Yes, for an Azure Functions host | Use its `logging.logLevel` section to configure Functions host logging. This is not used by ordinary ASP.NET Core or worker-service hosts. |
+| `launchSettings.json` | Indirectly | It selects a launch profile and can set environment variables such as `ASPNETCORE_ENVIRONMENT`; it does not configure Nilog or logging levels by itself. |
+| Other `settings.json` files | Only if your host loads them | Nilog has no `Nilog` settings schema. Load and bind such a file in your application, then configure MEL in C# or map its values into the standard logging configuration. |
+
+For example, an ASP.NET Core or worker host normally loads `appsettings.json` and its
+environment-specific counterpart. Select the environment in a launch profile, then put the
+level rules in the matching `appsettings.{Environment}.json` file:
+
+```jsonc
+// Properties/launchSettings.json
+{
+  "profiles": {
+    "MyApp": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}
+```
+
+```jsonc
+// appsettings.Development.json
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Debug",
+      "Microsoft": "Information"
+    }
+  }
+}
+```
+
+For Azure Functions, configure host-level filters in `host.json`. The included
+[`Nilog.Function`](Nilog/Nilog.Function) sample uses this form:
+
+```jsonc
+// host.json
+{
+  "version": "2.0",
+  "logging": {
+    "logLevel": {
+      "default": "Information",
+      "Nilog.Function": "Debug"
+    }
+  }
+}
+```
+
 ---
 
 ## 🔍 Static analysis (Nilog.Analyzers)
