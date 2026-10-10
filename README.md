@@ -631,6 +631,67 @@ builder.Logging
 Nilog's `IsEnabled` checks honour all of this automatically; there is nothing Nilog-specific to
 configure to make filtering work.
 
+### 🎚️ Minimum log level
+
+Set the minimum level in your host's MEL configuration. Nilog evaluates `ILogger.IsEnabled` before
+formatting a message, so a level filtered out by the host (such as `Debug` in Release) stays on
+Nilog's zero-allocation disabled path.
+
+**C# — choose a level at compile time**
+
+```csharp
+using Microsoft.Extensions.Logging;
+
+#if DEBUG
+// Debug build: include diagnostic application logs.
+builder.Logging.SetMinimumLevel(LogLevel.Debug);
+#else
+// Release build: omit Debug and Trace logs by default.
+builder.Logging.SetMinimumLevel(LogLevel.Information);
+#endif
+
+builder.Logging
+    .AddFilter("Microsoft", LogLevel.Warning)
+    .AddConsole();
+```
+
+`DEBUG` is defined by the Debug configuration; it is not defined by the Release configuration.
+The sample function app uses this exact pattern.
+
+**JSON — choose a level by environment**
+
+For ASP.NET Core and worker hosts that load the standard configuration files, keep the production
+default in `appsettings.json`, then override it in the environment-specific file:
+
+```jsonc
+// appsettings.json (used for Release/production by default)
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft": "Warning"
+    }
+  }
+}
+```
+
+```jsonc
+// appsettings.Development.json (used when ASPNETCORE_ENVIRONMENT=Development)
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Debug",
+      "Microsoft": "Information"
+    }
+  }
+}
+```
+
+`appsettings.{Environment}.json` is selected by the host environment, not by the C# build
+configuration. Use `Development` for locally running Debug builds and `Production` (or no
+override) for Release deployments; if needed, add an explicit `appsettings.Production.json` with
+the same `Information` level.
+
 ### 🧰 Optional Nilog hooks
 
 A handful of **static, process-wide** settings on `Nilogger` exist for advanced scenarios — custom
@@ -667,34 +728,6 @@ Nilogger.ShutdownUtcTimer();
 | `Nilogger.FlushAsync(cancellationToken)`                             | `Task.CompletedTask` (no-op) | **Real flush** when one or more callbacks are registered via `RegisterFlush` — awaits each in order. Stays a zero-allocation no-op when nothing is registered.                                                                               |
 | `Nilogger.ShutdownUtcTimer()`                                        | auto on process exit         | There is no background timer to stop — the UTC timestamp cache already refreshes lazily on read. This forces one final refresh for deterministic teardown; kept for source/binary compatibility. Idempotent and safe to call more than once. |
 
-> [!NOTE]
-> **Log levels and category filters are _not_ a Nilog setting.** Nilog rides on the standard
-> `Microsoft.Extensions.Logging` pipeline, so configure minimum levels the usual way — on the
-> logging builder or in `appsettings.json` — and Nilog's `IsEnabled` checks honour all of it.
-
-```csharp
-// Standard Microsoft.Extensions.Logging setup — Nilog respects every bit of it.
-using var loggerFactory = LoggerFactory.Create(builder =>
-{
-    builder
-        .SetMinimumLevel(LogLevel.Information)
-        .AddFilter("Microsoft", LogLevel.Warning)
-        .AddConsole();
-});
-```
-
-```jsonc
-// ...or via appsettings.json
-{
-  "Logging": {
-    "LogLevel": {
-      "Default": "Information",
-      "Microsoft": "Warning"
-    }
-  }
-}
-```
-
 ### 📁 Configuration files and hosts
 
 Nilog does not define a configuration section or read configuration files itself. It uses the
@@ -709,9 +742,8 @@ Nilog does not define a configuration section or read configuration files itself
 | `launchSettings.json` | Indirectly | It selects a launch profile and can set environment variables such as `ASPNETCORE_ENVIRONMENT`; it does not configure Nilog or logging levels by itself. |
 | Other `settings.json` files | Only if your host loads them | Nilog has no `Nilog` settings schema. Load and bind such a file in your application, then configure MEL in C# or map its values into the standard logging configuration. |
 
-For example, an ASP.NET Core or worker host normally loads `appsettings.json` and its
-environment-specific counterpart. Select the environment in a launch profile, then put the
-level rules in the matching `appsettings.{Environment}.json` file:
+For example, select the environment in a launch profile to load the matching
+`appsettings.{Environment}.json` level rules:
 
 ```jsonc
 // Properties/launchSettings.json
@@ -722,18 +754,6 @@ level rules in the matching `appsettings.{Environment}.json` file:
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       }
-    }
-  }
-}
-```
-
-```jsonc
-// appsettings.Development.json
-{
-  "Logging": {
-    "LogLevel": {
-      "Default": "Debug",
-      "Microsoft": "Information"
     }
   }
 }
