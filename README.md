@@ -29,7 +29,7 @@
 </samp>
 </div>
 
-<details>
+<details markdown="1">
 <summary><b>📑 Full table of contents</b></summary>
 
 <br>
@@ -122,6 +122,8 @@ logger.WriteDebug(
 </table>
 
 ---
+
+<a id="-limitations"></a>
 
 ## ⚠️ Limitations
 
@@ -300,7 +302,7 @@ At application level the difference is a **small allocation reduction**; through
 improved** (the client shared the machine, so the throughput result is inconclusive). Do not extrapolate
 micro-benchmark ratios to application performance.
 
-<details>
+<details markdown="1">
 <summary><b>📐 Methodology and limits</b></summary>
 
 <br>
@@ -452,7 +454,7 @@ logger.WriteInformation("Progress {Percent,3}% of {{total}}", 7);   // "Progress
 logger.WriteInformation("Id {Id:000}", 42);                          // "Id 042"
 ```
 
-<details>
+<details markdown="1">
 <summary><b>🧯 Rich exception reports</b></summary>
 
 <br>
@@ -507,7 +509,7 @@ Nilogger.ExceptionFormatter = (ex, title, verbose) =>
 
 </details>
 
-<details>
+<details markdown="1">
 <summary><b>🏷️ Scopes, the easy way</b></summary>
 
 <br>
@@ -553,7 +555,7 @@ afterwards never corrupts a scope in flight.
 
 </details>
 
-<details>
+<details markdown="1">
 <summary><b>🔌 Optional: draining a buffering sink on shutdown</b></summary>
 
 <br>
@@ -597,6 +599,8 @@ queryable fields — exactly as if you had used the framework's own templated lo
 the per-call array.
 
 ---
+
+<a id="-optional-advanced-configuration"></a>
 
 ## ⚙️ Optional advanced configuration
 
@@ -1117,7 +1121,7 @@ for errors, the **argument order**) changes.
 All members live in namespace `Nilog`. The `Write*` methods are extension methods on `ILogger`;
 `Nilogger` also exposes a static API and the global settings.
 
-<details open>
+<details open markdown="1">
 <summary><b>Level methods (Trace / Debug / Information / Warning)</b></summary>
 
 <br>
@@ -1138,7 +1142,7 @@ void WriteTrace<T0,/*…*/,T15>   (this ILogger logger, string message, T0 arg0,
 
 </details>
 
-<details>
+<details markdown="1">
 <summary><b>Error / Critical methods</b></summary>
 
 <br>
@@ -1161,7 +1165,7 @@ void WriteError<T0,/*…*/,T15> (this ILogger logger, string message, Exception 
 
 </details>
 
-<details>
+<details markdown="1">
 <summary><b>Exception reports</b></summary>
 
 <br>
@@ -1175,7 +1179,7 @@ void WriteCriticalException(this ILogger logger, Exception ex,
 
 </details>
 
-<details>
+<details markdown="1">
 <summary><b>Scopes</b></summary>
 
 <br>
@@ -1196,7 +1200,7 @@ IDisposable WriteScope(this ILogger logger, IReadOnlyDictionary<string, object> 
 
 </details>
 
-<details>
+<details markdown="1">
 <summary><b>Static <code>Nilogger.Log</code> (runtime level)</b></summary>
 
 <br>
@@ -1221,7 +1225,7 @@ void Log(ILogger logger, LogLevel level, Exception exception, string messageTemp
 
 </details>
 
-<details>
+<details markdown="1">
 <summary><b>Flush (drain buffering sinks)</b></summary>
 
 <br>
@@ -1235,7 +1239,7 @@ Task FlushAsync     (CancellationToken cancellationToken = default); // 0-alloc 
 
 </details>
 
-<details>
+<details markdown="1">
 <summary><b>Global settings</b></summary>
 
 <br>
@@ -1325,14 +1329,14 @@ A few deliberate design choices do all the work:
 
 ## ❓ FAQ
 
-<details>
+<details markdown="1">
 <summary><b>Does Nilog replace my logging framework?</b></summary>
 
 No. Nilog is a set of extension methods on `ILogger`. Your provider/sink (Console, Serilog, NLog,
 OpenTelemetry, Seq, App Insights, …) stays exactly as it is — Nilog just changes the call site.
 </details>
 
-<details>
+<details markdown="1">
 <summary><b>Why <code>Write*</code> and not <code>Log*</code>?</b></summary>
 
 `LogInformation`, `LogError`, etc. are already taken by Microsoft's own `ILogger` extensions.
@@ -1340,7 +1344,7 @@ Re-using those names would cause ambiguous-call compile errors in any file that 
 namespaces. `Write*` keeps Nilog unambiguous and lets you use both side by side.
 </details>
 
-<details>
+<details markdown="1">
 <summary><b>Is it really zero allocation?</b></summary>
 
 On the **disabled path**, yes — measured at **0 bytes** and ~2–3 ns for **0–16** typed args
@@ -1349,7 +1353,7 @@ rendered message string (every logger must), but avoids the `object[]` and any e
 measurably less than the conventional extensions at 1–6 args (e.g. 104 B vs 152 B at 3 args), **equal at 9 args** (376 B each), and still more than `LoggerMessage.Define`/`[LoggerMessage]` (48 B at 3 args). A single scope allocates ~80 B.
 </details>
 
-<details>
+<details markdown="1">
 <summary><b>What about 9+ arguments?</b></summary>
 
 Typed overloads now reach **sixteen** arguments (1–5 hand-written, 6–16 source-generated). A
@@ -1359,7 +1363,7 @@ a 9-arg enabled call is **equal to the conventional extension** in the v1.0.6 me
 extra context into a `WriteScope` typed scope instead of a single long template.
 </details>
 
-<details>
+<details markdown="1">
 <summary><b>Is it AOT / trimming safe?</b></summary>
 
 Yes — and **compiler-enforced**. `Nilog.Core` sets `<IsAotCompatible>true</IsAotCompatible>`, so the
@@ -1368,7 +1372,7 @@ build on any unsafe construct. No reflection; the Native AOT compiler emits nati
 `Nilog.dll` with zero warnings.
 </details>
 
-<details>
+<details markdown="1">
 <summary><b>Do structured properties still reach my sink?</b></summary>
 
 Yes. Named holes become structured properties and the original template is preserved as
@@ -1376,7 +1380,7 @@ Yes. Named holes become structured properties and the original template is prese
 [Structured logging, end to end](#-structured-logging-end-to-end).
 </details>
 
-<details>
+<details markdown="1">
 <summary><b>What does <code>Nilog.Analyzers</code> actually check?</b></summary>
 
 Eight rules, full parity with the SerilogAnalyzer set: **NILOG001** (interpolated `$"..."` template,
@@ -1391,6 +1395,8 @@ See [Static analysis](#-static-analysis-niloganalyzers).
 </details>
 
 ---
+
+<a id="-build-test-benchmark"></a>
 
 ## 🛠️ Build, test, benchmark
 
@@ -1425,6 +1431,8 @@ dotnet run -c Release --project Nilog.Benchmark -f net10.0
 | `Nilog.Benchmark`        | BenchmarkDotNet suites — 21 classes covering every surface area                                                                                                                          |
 
 ---
+
+<a id="-roadmap"></a>
 
 ## 🗺️ Roadmap
 
