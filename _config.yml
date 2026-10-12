@@ -1,0 +1,39 @@
+# GitHub Pages documentation site; does not configure application deployment.
+url: "https://gcfernando.github.io"
+baseurl: "/nilog"
+title: "Nilog"
+description: "Typed ILogger extensions for structured logging in .NET, with Roslyn analyzers, Native AOT support and performance documentation."
+lang: "en"
+plugins:
+  - jekyll-sitemap
+exclude:
+  - packages
+  - bin
+  - obj
+  - node_modules
+  - vendor
+  - tests
+  - .claude
+  - .agents
+  - .codex
+defaults:
+  - scope:
+      path: "CHANGELOG.md"
+    values:
+      title: "Changelog"
+      description: "All notable changes to Nilog are documented in this file."
+  - scope:
+      path: "Nilog/README.nuget.md"
+    values:
+      title: "⚡ Nilog"
+      description: "Nilog is a set of zero-allocation, strongly-typed extension methods on ILogger. It is not a new logging framework, provider, or transport — it sits on top of the…"
+  - scope:
+      path: "README.md"
+    values:
+      title: "⚡ Nilog — Zero-Allocation ILogger Extensions for .NET"
+      description: "Typed ILogger extensions for structured logging in .NET, with Roslyn analyzers, Native AOT support and performance documentation."
+  - scope:
+      path: "SECURITY.md"
+    values:
+      title: "Security Policy"
+      description: "Please do not open a public issue for security problems. Use GitHub's private vulnerability reporting (\"Security\" tab → \"Report a vulnerability\") on the Nilog repository. Include the…"

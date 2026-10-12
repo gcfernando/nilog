@@ -1,3 +1,4 @@
+<!-- {% raw %} -->
 <div align="center">
 
 # ⚡ Nilog — Zero-Allocation ILogger Extensions for .NET
@@ -1470,3 +1471,4 @@ goes a long way.
 **Nilog** built with care by **Gehan Fernando** — MIT Licensed
 
 <div align="center"><sub>Built for developers who count their allocations. ⚡</sub></div>
+<!-- {% endraw %} -->
