@@ -1,5 +1,5 @@
 <!-- {% raw %} -->
-<div align="center">
+<div align="center" markdown="1">
 
 # ⚡ Nilog — Zero-Allocation ILogger Extensions for .NET
 
@@ -21,7 +21,7 @@
 
 </div>
 
-<div align="center">
+<div align="center" markdown="1">
 <samp>
 
 [**Why?**](#-why-nilog) · [**vs Others**](#-nilog-vs-the-alternatives) · [**Benchmarks**](#-benchmarks) · [**Install**](#-install) · [**Quick start**](#-quick-start) · [**Pick a method**](#-choosing-the-right-method) · [**Features**](#-features) · [**Structured**](#-structured-logging-end-to-end) · [**Config**](#-optional-advanced-configuration) · [**Analyzer**](#-static-analysis-niloganalyzers) · [**Recipes**](#-recipes) · [**Best practices**](#-best-practices) · [**Migrate**](#-migrating-to-nilog) · [**API**](#-api-reference) · [**How**](#-how-it-works) · [**FAQ**](#-faq)
@@ -1478,5 +1478,11 @@ goes a long way.
 
 **Nilog** built with care by **Gehan Fernando** — MIT Licensed
 
-<div align="center"><sub>Built for developers who count their allocations. ⚡</sub></div>
+<div align="center" markdown="1"><sub>Built for developers who count their allocations. ⚡</sub></div>
 <!-- {% endraw %} -->
+
+---
+
+## Documentation links
+
+[Read all Nilog guides online](https://gcfernando.github.io/nilog/documentation/) · [Project overview](https://gcfernando.github.io/nilog/) · [All developer projects](https://gcfernando.github.io/gcfernando/projects/)

@@ -703,3 +703,9 @@ see the README for full tables and methodology):
 [1.0.1]: https://github.com/gcfernando/Nilog/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/gcfernando/Nilog/releases/tag/v1.0.0
 <!-- {% endraw %} -->
+
+---
+
+## Documentation links
+
+[Read all Nilog guides online](https://gcfernando.github.io/nilog/documentation/) · [Project overview](https://gcfernando.github.io/nilog/) · [All developer projects](https://gcfernando.github.io/gcfernando/projects/)

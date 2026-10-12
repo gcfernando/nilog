@@ -34,3 +34,9 @@ Nilog is a call-site extension layer over `Microsoft.Extensions.Logging`.
 - NuGet restore uses lock files (`packages.lock.json`) with `--locked-mode` in CI.
 - Package signing and SBOM publication are release-time procedures that require maintainer
   credentials; they are not performed by the repository automatically.
+
+---
+
+## Documentation links
+
+[Read all Nilog guides online](https://gcfernando.github.io/nilog/documentation/) · [Project overview](https://gcfernando.github.io/nilog/) · [All developer projects](https://gcfernando.github.io/gcfernando/projects/)

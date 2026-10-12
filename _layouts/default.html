@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="{{ site.lang | default: 'en' }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {% seo %}
+  <link rel="stylesheet" href="{{ '/assets/css/style.css' | relative_url }}">
+  <link rel="stylesheet" href="{{ '/assets/css/documentation.css' | relative_url }}">
+  <link rel="icon" href="{{ '/assets/images/mark.svg' | relative_url }}" type="image/svg+xml">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="site-banner">
+    <div class="banner-inner">
+      <a class="brand" href="{{ '/' | relative_url }}"><span class="brand-mark" aria-hidden="true">GF</span><span>{{ site.title }}</span></a>
+      <nav class="primary-nav" aria-label="Primary navigation">
+        <a href="{{ '/' | relative_url }}">Overview</a>
+        <a href="{{ '/documentation/' | relative_url }}">All guides</a>
+        <a href="{{ site.projects_hub }}">All projects</a>
+        <a class="github-link" href="https://github.com/{{ site.repository }}">GitHub <span aria-hidden="true">↗</span></a>
+      </nav>
+      <div class="banner-copy"><p class="eyebrow">{{ site.project_category }} · Open-source documentation</p><p class="banner-title">Explore. Learn. Build.</p><p>{{ site.description }}</p></div>
+    </div>
+  </header>
+  <main id="main-content" class="page-shell" tabindex="-1">
+    <article class="content-card markdown-body">
+      {% unless content contains '<h1' %}
+      <div class="page-heading"><p class="eyebrow">{{ site.title }}</p><h1>{{ page.title | default: site.title }}</h1></div>
+      {% endunless %}
+      <div class="document-content">{{ content }}</div>
+    </article>
+  </main>
+  <footer class="site-footer"><div><strong>Gehan Fernando</strong><p>Practical software. Clear examples. Shared knowledge.</p></div><nav aria-label="Footer navigation"><a href="{{ '/documentation/' | relative_url }}">Documentation</a><a href="{{ site.projects_hub }}">Projects</a><a href="{{ '/sitemap.xml' | relative_url }}">Sitemap</a><a href="https://github.com/{{ site.repository }}">Source on GitHub</a></nav></footer>
+</body>
+</html>

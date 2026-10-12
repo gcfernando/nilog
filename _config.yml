@@ -37,3 +37,9 @@ defaults:
     values:
       title: "Security Policy"
       description: "Please do not open a public issue for security problems. Use GitHub's private vulnerability reporting (\"Security\" tab → \"Report a vulnerability\") on the Nilog repository. Include the…"
+
+# Public documentation navigation and presentation.
+repository: gcfernando/nilog
+theme: jekyll-theme-primer
+projects_hub: https://gcfernando.github.io/gcfernando/projects/
+project_category: "Libraries & packages"

@@ -505,3 +505,9 @@ template), and `NILOG008` (non-PascalCase placeholder name, Info) — across eve
 ## 📄 License
 
 MIT © Gehan Fernando. Full docs at [github.com/gcfernando/Nilog](https://github.com/gcfernando/Nilog).
+
+---
+
+## Documentation links
+
+[Read all Nilog guides online](https://gcfernando.github.io/nilog/documentation/) · [Project overview](https://gcfernando.github.io/nilog/) · [All developer projects](https://gcfernando.github.io/gcfernando/projects/)
