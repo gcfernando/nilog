@@ -3,7 +3,9 @@
 
 # ⚡ Nilog — Zero-Allocation ILogger Extensions for .NET
 
-### High-performance C# structured logging extensions for `Microsoft.Extensions.Logging`.
+<a id="high-performance-c-structured-logging-extensions-for-microsoftextensionslogging"></a>
+
+High-performance C# structured logging extensions for `Microsoft.Extensions.Logging`.
 
 **Typed message-template overloads reduce call-site allocations while preserving your existing `ILogger` pipeline and sinks.**
 
@@ -11,7 +13,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%209.0%20%7C%2010.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com)
 [![C#](https://img.shields.io/badge/C%23-latest-239120?logo=csharp&logoColor=white)](https://learn.microsoft.com/dotnet/csharp/)
-[![Tests](https://img.shields.io/badge/tests-318%20passing%20per%20TFM-2ea44f?logo=xunit&logoColor=white)](#-build-test-benchmark)
+[![Tests](https://img.shields.io/badge/tests-build%20and%20run-2ea44f?logo=xunit&logoColor=white)](#-build-test-benchmark)
 [![Disabled path](https://img.shields.io/badge/disabled%20call-0%20bytes%20%7C%20~2%20ns-2ea44f)](#-benchmarks)
 [![Enabled vs MS](https://img.shields.io/badge/enabled%20path-lower%20alloc%20than%20MEL%20extensions-0d6efd)](#-benchmarks)
 [![16-arg typed](https://img.shields.io/badge/up%20to%2016--arg%20typed-0%20bytes%20disabled-brightgreen)](#-benchmarks)
@@ -88,7 +90,7 @@ logger.WriteInformation("User {UserId} ordered {Count} items", userId, count);
 //      ^ no object[] allocated, ever — and nothing at all when Information is disabled
 ```
 
-### ❌ Before / ✅ After
+## ❌ Before / ✅ After
 
 <table>
 <tr>

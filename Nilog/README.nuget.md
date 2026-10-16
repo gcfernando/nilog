@@ -1,6 +1,8 @@
 # ⚡ Nilog
 
-### Allocation-aware, high-performance logging for `Microsoft.Extensions.Logging`
+<a id="allocation-aware-high-performance-logging-for-microsoftextensionslogging"></a>
+
+Allocation-aware, high-performance logging for `Microsoft.Extensions.Logging`
 
 **Same `ILogger`. Same `{Named}` templates. None of the garbage.**
 
