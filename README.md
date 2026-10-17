@@ -1402,6 +1402,14 @@ See [Static analysis](#-static-analysis-niloganalyzers).
 
 ## 🛠️ Build, test, benchmark
 
+Install the exact .NET SDK version specified in the repository-root `global.json`
+(currently **10.0.401**) and the .NET 8, 9, and 10 runtimes to run all tests.
+Run the commands below from the `Nilog` directory. CI and release builds use the
+same pinned SDK: SDK updates can change the implicit `Microsoft.NET.ILLink.Tasks`
+dependencies, so update `global.json` and regenerate the affected `packages.lock.json`
+files together with `dotnet restore Nilog.sln --force-evaluate`, then verify
+`dotnet restore Nilog.sln --locked-mode` before committing an SDK upgrade.
+
 ```bash
 # Build everything (net8.0 / net9.0 / net10.0)
 dotnet build -c Release
