@@ -1,4 +1,4 @@
-# ⚡ Nilog
+# ⚡ Nilog — Low-Allocation ILogger Extensions for .NET
 
 <a id="allocation-aware-high-performance-logging-for-microsoftextensionslogging"></a>
 

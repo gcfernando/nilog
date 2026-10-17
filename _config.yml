@@ -2,7 +2,7 @@
 url: "https://gcfernando.github.io"
 baseurl: "/nilog"
 title: "Nilog"
-description: "Typed ILogger extensions for structured logging in .NET, with Roslyn analyzers, Native AOT support and performance documentation."
+description: "Low-allocation typed ILogger extensions for structured logging in .NET, with Roslyn analyzers, Native AOT support and performance documentation."
 lang: "en"
 plugins:
   - jekyll-sitemap
@@ -20,23 +20,23 @@ defaults:
   - scope:
       path: "CHANGELOG.md"
     values:
-      title: "Changelog"
-      description: "All notable changes to Nilog are documented in this file."
+      title: "Nilog Changelog and Release Notes"
+      description: "Review Nilog release history, including ILogger extension updates, analyzer improvements, fixes and compatibility changes."
   - scope:
       path: "Nilog/README.nuget.md"
     values:
-      title: "⚡ Nilog"
-      description: "Nilog is a set of zero-allocation, strongly-typed extension methods on ILogger. It is not a new logging framework, provider, or transport — it sits on top of the…"
+      title: "Nilog NuGet Package — Typed ILogger Extensions for .NET"
+      description: "Install Nilog from NuGet and use typed structured logging extensions with Microsoft.Extensions.Logging, Roslyn analyzers and Native AOT support."
   - scope:
       path: "README.md"
     values:
-      title: "⚡ Nilog — Zero-Allocation ILogger Extensions for .NET"
-      description: "Typed ILogger extensions for structured logging in .NET, with Roslyn analyzers, Native AOT support and performance documentation."
+      title: "Nilog — Low-Allocation Structured Logging Extensions for .NET"
+      description: "Low-allocation typed ILogger extensions for structured logging in .NET, with Roslyn analyzers, Native AOT support and performance documentation."
   - scope:
       path: "SECURITY.md"
     values:
-      title: "Security Policy"
-      description: "Please do not open a public issue for security problems. Use GitHub's private vulnerability reporting (\"Security\" tab → \"Report a vulnerability\") on the Nilog repository. Include the…"
+      title: "Nilog Security Policy and Vulnerability Reporting"
+      description: "Find Nilog vulnerability reporting instructions, supported version guidance and the information to include in a private security report."
 
 # Public documentation navigation and presentation.
 repository: gcfernando/nilog

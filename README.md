@@ -1,7 +1,7 @@
 <!-- {% raw %} -->
 <div align="center" markdown="1">
 
-# ⚡ Nilog — Zero-Allocation ILogger Extensions for .NET
+# ⚡ Nilog — Low-Allocation Structured Logging Extensions for .NET
 
 <a id="high-performance-c-structured-logging-extensions-for-microsoftextensionslogging"></a>
 
@@ -767,7 +767,7 @@ For example, select the environment in a launch profile to load the matching
 ```
 
 For Azure Functions, configure host-level filters in `host.json`. The included
-[`Nilog.Function`](Nilog/Nilog.Function) sample uses this form:
+[`Nilog.Function`](https://github.com/gcfernando/nilog/tree/main/Nilog/Nilog.Function) sample uses this form:
 
 ```jsonc
 // host.json
@@ -865,7 +865,7 @@ or gets pulled transitively into anything that references your project.
 
 Building this repo from source instead of consuming the NuGet package? Reference the analyzer
 project directly with `OutputItemType="Analyzer"` so it runs at build time without becoming a
-runtime dependency — exactly how [`Nilog.Function`](Nilog/Nilog.Function) wires it in:
+runtime dependency — exactly how [`Nilog.Function`](https://github.com/gcfernando/nilog/tree/main/Nilog/Nilog.Function) wires it in:
 
 ```xml
 <ProjectReference Include="..\Nilog.Analyzers\Nilog.Analyzers.csproj"
@@ -1041,7 +1041,7 @@ public sealed class RequestLoggingMiddleware(ILogger<RequestLoggingMiddleware> l
 }
 ```
 
-> The full runnable version lives in [`Nilog.Function`](Nilog/Nilog.Function) — an HTTP checkout
+> The full runnable version lives in [`Nilog.Function`](https://github.com/gcfernando/nilog/tree/main/Nilog/Nilog.Function) — an HTTP checkout
 > service (`POST /api/orders`) that exercises every Nilog feature against a real flow.
 
 ### Custom JSON exception reports
